@@ -10,6 +10,10 @@ import ContributionForm from "./contribution-form";
 import { toast } from "sonner";
 import { distance, type Site } from "@/lib/data";
 import MapView from "./map-view";
+import SatellitePanel from "./satellite-panel";
+import { stateViews, nationalView, type MapTarget } from "@/lib/national";
+import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 import { Toaster } from "@/components/ui/sonner";
 import {
   TreePine,
@@ -72,6 +76,59 @@ export default function Treefinder({
   const [error, setError] = useState("");
   const [form, setForm] = useState<{ kind: string; initial: any } | null>(null);
   const [location, setLocation] = useState<[number, number] | null>(null);
+  const [target, setTarget] = useState<MapTarget>(nationalView);
+  const [stateCode, setStateCode] = useState("USA");
+  const [focusSite, setFocusSite] = useState(false);
+  const [mapCenter, setMapCenter] = useState<[number, number]>([
+    nationalView.lat,
+    nationalView.lng,
+  ]);
+  const [ndvi, setNdvi] = useState(true);
+  const [imagery, setImagery] = useState<{
+    date: string;
+    ranges: { start: string; end: string }[];
+  } | null>(null);
+  const [date, setDate] = useState("");
+  const [imageryError, setImageryError] = useState("");
+  const [opacity, setOpacity] = useState(0.65);
+  const loadImagery = useCallback(async () => {
+    setImageryError("");
+    try {
+      const r = await fetch("/api/vegetation");
+      const j: any = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      setImagery(j);
+      setDate(j.date);
+    } catch (e: any) {
+      setImageryError(e.message);
+    }
+  }, []);
+  useEffect(() => {
+    loadImagery();
+  }, [loadImagery]);
+  const chooseState = (code: string) => {
+    const state = stateViews.find((s) => s.code === code);
+    setStateCode(code);
+    setFocusSite(false);
+    setQuery("");
+    const next = state ? { ...state, label: state.name } : { ...nationalView };
+    setTarget(next);
+    setMapCenter([next.lat, next.lng]);
+    setLocation(state ? [state.lat, state.lng] : null);
+  };
+  const selectSite = (site: Site) => {
+    setSelected(site);
+    setFocusSite(true);
+  };
+  const suggestAtCenter = () =>
+    setForm({
+      kind: "site",
+      initial: {
+        lat: mapCenter[0].toFixed(5),
+        lng: mapCenter[1].toFixed(5),
+        space: 35,
+      },
+    });
   const refresh = useCallback(async () => {
     try {
       const r = await fetch("/api/community");
@@ -127,6 +184,7 @@ export default function Treefinder({
   const filtered = allSites
     .filter(
       (s) =>
+        (!location || distance(...location, s.lat, s.lng) <= 100) &&
         (priority === "All priorities" || s.priority === priority) &&
         `${s.name} ${s.area}`.toLowerCase().includes(query.toLowerCase()),
     )
@@ -157,7 +215,7 @@ export default function Treefinder({
           execute(input: any) {
             const site = allSites.find((s) => s.id === input.siteId);
             if (!site) throw new Error("Unknown planting site");
-            setSelected(site);
+            selectSite(site);
             setView("Explore map");
             return {
               siteId: site.id,
@@ -286,7 +344,7 @@ export default function Treefinder({
           </span>
           <div className="top-actions">
             <span className="location-label">
-              <MapPin size={16} /> New York City, NY
+              <MapPin size={16} /> {target.label}
             </span>
             {user ? (
               <span className="mini-avatar">{user.name[0].toUpperCase()}</span>
@@ -343,12 +401,18 @@ export default function Treefinder({
               onClick={() =>
                 setForm({
                   kind: "site",
-                  initial: {
-                    lat: selected.lat,
-                    lng: selected.lng,
-                    zone: selected.zone,
-                    space: 35,
-                  },
+                  initial: focusSite
+                    ? {
+                        lat: selected.lat,
+                        lng: selected.lng,
+                        zone: selected.zone,
+                        space: 35,
+                      }
+                    : {
+                        lat: mapCenter[0].toFixed(5),
+                        lng: mapCenter[1].toFixed(5),
+                        space: 35,
+                      },
                 })
               }
             >
@@ -372,7 +436,7 @@ export default function Treefinder({
                     <strong>
                       {allSites.length} <small>planting areas</small>
                     </strong>
-                    <p>Explore neighborhood opportunities</p>
+                    <p>Example & community-reported sites</p>
                   </div>
                 </div>
                 <div>
@@ -392,13 +456,90 @@ export default function Treefinder({
                   </span>
                   <div>
                     <strong>
-                      3 <small>community events</small>
+                      50 <small>states to explore</small>
                     </strong>
-                    <p>Put down roots, together</p>
+                    <p>Nationwide satellite vegetation</p>
                   </div>
                 </div>
-                <span className="sample-tag">Preview data</span>
+                <span className="sample-tag">
+                  Initial sites & events are examples
+                </span>
               </div>
+              <section
+                className="national-toolbar"
+                aria-label="National map and vegetation controls"
+              >
+                <div className="national-picker">
+                  <span>Explore a state</span>
+                  <Select value={stateCode} onValueChange={chooseState}>
+                    <SelectTrigger aria-label="Choose a state">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="USA">
+                        United States overview
+                      </SelectItem>
+                      {stateViews.map((s) => (
+                        <SelectItem key={s.code} value={s.code}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <label className="national-ndvi">
+                  <Switch
+                    checked={ndvi}
+                    onCheckedChange={setNdvi}
+                    aria-label="Show satellite NDVI vegetation"
+                  />
+                  <span>
+                    Satellite vegetation<small>NASA · 250 m NDVI</small>
+                  </span>
+                </label>
+                <label className="national-date">
+                  <span>Observation date</span>
+                  <input
+                    type="date"
+                    aria-label="Vegetation observation date"
+                    value={date}
+                    min={imagery?.ranges[0]?.start}
+                    max={imagery?.date}
+                    disabled={!imagery}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (
+                        imagery?.ranges.some((r) => v >= r.start && v <= r.end)
+                      ) {
+                        setDate(v);
+                      } else {
+                        toast.error(
+                          "NASA has no imagery for that date. Choose a published date.",
+                        );
+                      }
+                    }}
+                  />
+                </label>
+                <div className="national-opacity">
+                  <span>Layer opacity</span>
+                  <Slider
+                    aria-label="Vegetation layer opacity"
+                    min={0.1}
+                    max={1}
+                    step={0.05}
+                    value={[opacity]}
+                    onValueChange={(v) =>
+                      setOpacity(Array.isArray(v) ? v[0] : v)
+                    }
+                  />
+                </div>
+              </section>
+              {imageryError && (
+                <div className="storage-error" role="alert">
+                  <span>{imageryError}</span>
+                  <button onClick={loadImagery}>Try again</button>
+                </div>
+              )}
               <section className="explore-grid">
                 <div className="map-column">
                   <div className="map-toolbar">
@@ -430,16 +571,30 @@ export default function Treefinder({
                   <MapView
                     sites={filtered}
                     selected={selected}
-                    onSelect={setSelected}
-                    onLocation={(lat, lng) => setLocation([lat, lng])}
+                    onSelect={selectSite}
+                    onLocation={(lat, lng) => {
+                      setLocation([lat, lng]);
+                      setFocusSite(false);
+                      setStateCode("USA");
+                      setTarget({ lat, lng, zoom: 13, label: "Your location" });
+                    }}
+                    target={target}
+                    ndvi={ndvi}
+                    date={date}
+                    opacity={opacity}
+                    focusSite={focusSite}
+                    onMove={(lat, lng) => setMapCenter([lat, lng])}
                   />
                   <div className="area-list-head">
                     <h2>
-                      Planting areas nearby <span>{filtered.length}</span>
+                      {location
+                        ? "Sites within 100 km"
+                        : "Recorded planting areas"}{" "}
+                      <span>{filtered.length}</span>
                     </h2>
                     <span>
                       {location
-                        ? "Sorted by distance from you"
+                        ? "From your selected view"
                         : "Example & community sites"}{" "}
                       · assessment required
                     </span>
@@ -449,7 +604,7 @@ export default function Treefinder({
                       <button
                         key={s.id}
                         className={`area-card ${selected.id === s.id ? "selected" : ""}`}
-                        onClick={() => setSelected(s)}
+                        onClick={() => selectSite(s)}
                       >
                         <span
                           className={`area-pin ${s.priority.toLowerCase()}`}
@@ -470,124 +625,144 @@ export default function Treefinder({
                     ))}
                     {!filtered.length && (
                       <p className="empty">
-                        No areas match your search. Try another neighborhood.
+                        No recorded sites match this view. You can suggest a
+                        planting site; satellite vegetation is available
+                        nationwide.
                       </p>
                     )}
                   </div>
                 </div>
-                <aside className="site-panel">
-                  <div className="panel-top">
-                    <span className="eyebrow">PLANTING SITE INSIGHTS</span>
-                    <span
-                      className={`priority-badge ${selected.priority.toLowerCase()}`}
+                {!focusSite ? (
+                  <SatellitePanel
+                    point={mapCenter}
+                    date={date}
+                    enabled={ndvi}
+                    onSuggest={suggestAtCenter}
+                  />
+                ) : (
+                  <aside className="site-panel">
+                    <button
+                      className="outline-btn"
+                      style={{ marginBottom: 20 }}
+                      onClick={() => chooseState("USA")}
                     >
-                      {selected.priority} priority
-                    </span>
-                  </div>
-                  <h2>{selected.name}</h2>
-                  <p className="site-address">
-                    <MapPin size={14} />
-                    {selected.area}
-                  </p>
-                  <div className="canopy-box">
-                    <div>
-                      <span>
-                        {selected.example
-                          ? "Illustrative canopy coverage"
-                          : "Canopy coverage"}
+                      Return to nationwide vegetation
+                    </button>
+                    <div className="panel-top">
+                      <span className="eyebrow">PLANTING SITE INSIGHTS</span>
+                      <span
+                        className={`priority-badge ${selected.priority.toLowerCase()}`}
+                      >
+                        {selected.priority} priority
                       </span>
+                    </div>
+                    <h2>{selected.name}</h2>
+                    <p className="site-address">
+                      <MapPin size={14} />
+                      {selected.area}
+                    </p>
+                    <div className="canopy-box">
+                      <div>
+                        <span>
+                          {selected.example
+                            ? "Illustrative canopy coverage"
+                            : "Canopy coverage"}
+                        </span>
+                        <strong>
+                          {selected.example ? selected.canopy : "—"}
+                          <small>{selected.example ? "%" : ""}</small>
+                        </strong>
+                      </div>
+                      <div className="canopy-track">
+                        <i style={{ width: `${selected.canopy}%` }} />
+                      </div>
+                      <p>
+                        {selected.example
+                          ? "Example conditions, pending a local site assessment."
+                          : "Community-reported conditions; canopy has not been measured."}
+                      </p>
+                    </div>
+                    <h3 className="section-label">
+                      Know the growing conditions
+                    </h3>
+                    <div className="condition-grid">
+                      <div>
+                        <Sprout />
+                        <span>Soil type</span>
+                        <strong>{selected.soil}</strong>
+                      </div>
+                      <div>
+                        <Sun />
+                        <span>Sunlight</span>
+                        <strong>{selected.sun}</strong>
+                      </div>
+                      <div>
+                        <Droplets />
+                        <span>Water</span>
+                        <strong>{selected.water}</strong>
+                      </div>
+                      <div>
+                        <TreePine />
+                        <span>Canopy space</span>
+                        <strong>{selected.space} ft</strong>
+                      </div>
+                    </div>
+                    <div className="zone-line">
+                      <span>USDA hardiness zone</span>
                       <strong>
-                        {selected.example ? selected.canopy : "—"}
-                        <small>{selected.example ? "%" : ""}</small>
+                        {selected.zone}{" "}
+                        <small>
+                          ({selected.example ? "example" : "reported"})
+                        </small>
                       </strong>
                     </div>
-                    <div className="canopy-track">
-                      <i style={{ width: `${selected.canopy}%` }} />
+                    <div className="recommend-head">
+                      <h3>Right trees for this place</h3>
+                      <Leaf size={17} />
                     </div>
-                    <p>
-                      {selected.example
-                        ? "Example conditions, pending a local site assessment."
-                        : "Community-reported conditions; canopy has not been measured."}
+                    <p className="recommend-desc">
+                      Matched to sunlight, soil, space, water and zone.
                     </p>
-                  </div>
-                  <h3 className="section-label">Know the growing conditions</h3>
-                  <div className="condition-grid">
-                    <div>
-                      <Sprout />
-                      <span>Soil type</span>
-                      <strong>{selected.soil}</strong>
+                    {[...trees]
+                      .sort(
+                        (a, b) =>
+                          matchTree(b, selected).score -
+                          matchTree(a, selected).score,
+                      )
+                      .slice(0, 3)
+                      .map((t) => (
+                        <button
+                          className="tree-match"
+                          key={t.id}
+                          onClick={() => setView("Tree catalog")}
+                        >
+                          <span className="tree-icon">
+                            <TreePine />
+                          </span>
+                          <div>
+                            <strong>{t.name}</strong>
+                            <em>{t.latin}</em>
+                          </div>
+                          <span>
+                            {matchTree(t, selected).score}%<small>match</small>
+                          </span>
+                        </button>
+                      ))}
+                    <button
+                      className="outline-btn"
+                      onClick={() => setView("Tree catalog")}
+                    >
+                      Explore the tree catalog <ArrowUpRight size={15} />
+                    </button>
+                    <div className="site-note">
+                      <ShieldCheck size={17} />
+                      <p>
+                        Recommendations guide exploration. An arborist should
+                        verify conditions before planting.
+                      </p>
                     </div>
-                    <div>
-                      <Sun />
-                      <span>Sunlight</span>
-                      <strong>{selected.sun}</strong>
-                    </div>
-                    <div>
-                      <Droplets />
-                      <span>Water</span>
-                      <strong>{selected.water}</strong>
-                    </div>
-                    <div>
-                      <TreePine />
-                      <span>Canopy space</span>
-                      <strong>{selected.space} ft</strong>
-                    </div>
-                  </div>
-                  <div className="zone-line">
-                    <span>USDA hardiness zone</span>
-                    <strong>
-                      {selected.zone}{" "}
-                      <small>
-                        ({selected.example ? "example" : "reported"})
-                      </small>
-                    </strong>
-                  </div>
-                  <div className="recommend-head">
-                    <h3>Right trees for this place</h3>
-                    <Leaf size={17} />
-                  </div>
-                  <p className="recommend-desc">
-                    Matched to sunlight, soil, space, water and zone.
-                  </p>
-                  {[...trees]
-                    .sort(
-                      (a, b) =>
-                        matchTree(b, selected).score -
-                        matchTree(a, selected).score,
-                    )
-                    .slice(0, 3)
-                    .map((t) => (
-                      <button
-                        className="tree-match"
-                        key={t.id}
-                        onClick={() => setView("Tree catalog")}
-                      >
-                        <span className="tree-icon">
-                          <TreePine />
-                        </span>
-                        <div>
-                          <strong>{t.name}</strong>
-                          <em>{t.latin}</em>
-                        </div>
-                        <span>
-                          {matchTree(t, selected).score}%<small>match</small>
-                        </span>
-                      </button>
-                    ))}
-                  <button
-                    className="outline-btn"
-                    onClick={() => setView("Tree catalog")}
-                  >
-                    Explore the tree catalog <ArrowUpRight size={15} />
-                  </button>
-                  <div className="site-note">
-                    <ShieldCheck size={17} />
-                    <p>
-                      Recommendations guide exploration. An arborist should
-                      verify conditions before planting.
-                    </p>
-                  </div>
-                </aside>
+                  </aside>
+                )}
               </section>
             </>
           ) : (

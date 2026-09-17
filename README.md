@@ -4,7 +4,9 @@ A responsive tree information and stewardship app built with React, Vinext, Leaf
 
 ## Features
 
-- Interactive OpenStreetMap map, priority filters, neighborhood search, geolocation, and planting-site insights.
+- Nationwide OpenStreetMap explorer with navigation for all 50 states and DC, geolocation, site search, priority filters, and local planting-site insights.
+- Real NASA GIBS MODIS Terra NDVI overlay across the USA, including Alaska and Hawaii; published imagery dates, opacity control, official color legend, and explicit 250 m resolution.
+- Public AWS Sentinel-2 Collection 1 L2A scene discovery near the map center, with acquisition dates, tile-wide cloud percentages, and source STAC records.
 - Optional historical NYC Parks 2015 street-tree census overlay from NYC Open Data.
 - Native species catalog with sunlight, size, and hardiness filters; botanical sources; wildlife information; transparent five-factor site matching; one favorite-tree vote per account.
 - Event registration and cancellation, volunteer profiles, participation history, and administrator-reviewed hours.
@@ -28,6 +30,16 @@ node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1
 ```
 
 Hosted D1 migrations are applied by Sites during deployment. Database writes use prepared statements and are attributed to authenticated identities. Browser storage is not used for authoritative records.
+
+## Nationwide satellite coverage
+
+`/api/vegetation` resolves NASA GIBS's published imagery dates from its official WMTS capabilities. Leaflet loads cached public map tiles directly from NASA's `MODIS_Terra_NDVI_8Day` layer. The source uses 250 m MODIS pixels and rolling 8-day observations. At close zoom, tiles are enlarged; no additional spatial detail is created. Missing dates are rejected and missing tiles are not interpreted as low vegetation. Coverage is national; individual pixels can be missing due to clouds, snow, or observation quality. Alaska and Hawaii have separate navigation entries; the layer is global and also supports the Aleutians across the date line.
+
+`/api/satellite` searches Earth Search's `sentinel-2-c1-l2a` collection for the latest eight scenes intersecting a small map-center bounding box over the 60 days ending on the chosen date. It returns public red, NIR, and scene-classification asset URLs, acquisition dates, and scene-wide cloud cover. Scene discovery is not an NDVI computation, and the map's displayed NDVI remains NASA's 250 m product.
+
+A custom nationwide 10 m Sentinel-2 preprocessing service is not deployed. It would run separately from the web request runtime: partition the USA into land-intersecting work units, read cloud-optimized GeoTIFF windows, apply each asset's reflectance scale/offset, mask clouds/shadows/snow/no-data with SCL, form seasonal multi-scene composites, and store NDVI plus valid-observation coverage as COGs and cached tiles. Use restartable jobs and a bounded concurrency budget. Raw imagery is openly accessible, while production compute, output storage, and delivery need an explicit infrastructure budget. Low NDVI alone cannot establish planting suitability; canopy, heat, plantable land, native range, utilities, and permissions are separate requirements.
+
+Sources: [NASA GIBS](https://earthdata.nasa.gov/gibs), [public Sentinel-2 COGs](https://registry.opendata.aws/sentinel-2-l2a-cogs/), [Earth Search](https://github.com/Element84/earth-search).
 
 ## Data and geospatial limits
 

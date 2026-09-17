@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Layers, LocateFixed, LoaderCircle, Plus, Minus } from "lucide-react";
 import type { Site } from "@/lib/data";
+import { nationalView, ndviTileUrl, type MapTarget } from "@/lib/national";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 export default function MapView({
@@ -9,17 +10,33 @@ export default function MapView({
   selected,
   onSelect,
   onLocation,
+  target,
+  ndvi,
+  date,
+  opacity,
+  focusSite,
+  onMove,
 }: {
   sites: Site[];
   selected: Site;
   onSelect: (s: Site) => void;
   onLocation: (lat: number, lng: number) => void;
+  target: MapTarget;
+  ndvi: boolean;
+  date: string;
+  opacity: number;
+  focusSite: boolean;
+  onMove: (lat: number, lng: number) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const map = useRef<any>(null);
   const leaflet = useRef<any>(null);
   const siteLayer = useRef<any>(null);
   const censusLayer = useRef<any>(null);
+  const vegetationLayer = useRef<any>(null);
+  const moveRef = useRef(onMove);
+  moveRef.current = onMove;
+  const [vegetationFailed, setVegetationFailed] = useState(false);
   const [ready, setReady] = useState(false);
   const [census, setCensus] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -38,8 +55,12 @@ export default function MapView({
         const m = L.map(host.current, {
           zoomControl: false,
           scrollWheelZoom: false,
-          minZoom: 3,
-        }).setView([40.691, -73.951], 13);
+          minZoom: 2,
+        }).setView([nationalView.lat, nationalView.lng], nationalView.zoom);
+        m.on("moveend", () => {
+          const c = m.getCenter();
+          moveRef.current(c.lat, ((((c.lng + 180) % 360) + 360) % 360) - 180);
+        });
         map.current = m;
         const tiles = L.tileLayer(
           "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -110,13 +131,54 @@ export default function MapView({
     });
   }, [ready, sites, selected]);
   useEffect(() => {
-    if (map.current && ready)
+    if (map.current && ready && focusSite)
       map.current.flyTo([selected.lat, selected.lng], 13, { duration: 0.5 });
-  }, [selected.id, ready]);
+  }, [selected.id, ready, focusSite]);
+  useEffect(() => {
+    if (map.current && ready && !focusSite)
+      map.current.flyTo([target.lat, target.lng], target.zoom, {
+        duration: 0.5,
+      });
+  }, [target, ready, focusSite]);
+  useEffect(() => {
+    if (!ready) return;
+    vegetationLayer.current?.remove();
+    vegetationLayer.current = null;
+    setVegetationFailed(false);
+    if (!ndvi || !date) return;
+    const layer = leaflet.current
+      .tileLayer(ndviTileUrl(date), {
+        maxNativeZoom: 9,
+        maxZoom: 19,
+        minZoom: 2,
+        opacity,
+        attribution:
+          '<a href="https://earthdata.nasa.gov/gibs">NASA GIBS</a> · MODIS Terra NDVI · 250 m',
+      })
+      .addTo(map.current);
+    vegetationLayer.current = layer;
+    layer.on("tileerror", () => setVegetationFailed(true));
+    return () => {
+      layer.remove();
+    };
+  }, [ready, ndvi, date]);
+  useEffect(() => {
+    vegetationLayer.current?.setOpacity(opacity);
+  }, [opacity]);
   useEffect(() => {
     if (!ready) return;
     censusLayer.current.clearLayers();
-    if (!census) return;
+    setSummary(null);
+    setLoading(false);
+    if (
+      !census ||
+      !focusSite ||
+      selected.lat < 40.45 ||
+      selected.lat > 40.95 ||
+      selected.lng < -74.3 ||
+      selected.lng > -73.65
+    )
+      return;
     let stopped = false;
     const abort = new AbortController();
     setLoading(true);
@@ -155,7 +217,7 @@ export default function MapView({
       stopped = true;
       abort.abort();
     };
-  }, [census, selected.id, ready]);
+  }, [census, selected.id, ready, focusSite]);
   function locate() {
     if (!navigator.geolocation) {
       toast.error("Location is unavailable in this browser.");
@@ -184,11 +246,12 @@ export default function MapView({
       {!ready && (
         <div className="map-loading">
           <LoaderCircle className="animate-spin" />
-          Loading neighborhood map
+          Loading United States map
         </div>
       )}
       <div className="map-chip">
-        <Layers size={16} /> Planting priorities
+        <Layers size={16} />{" "}
+        {ndvi ? "Vegetation · 250 m NDVI" : "Community planting sites"}
       </div>
       <div className="map-controls">
         <button aria-label="Zoom in" onClick={() => map.current?.zoomIn()}>
@@ -201,26 +264,32 @@ export default function MapView({
           <LocateFixed size={18} />
         </button>
       </div>
-      <label className="census-toggle">
-        <Switch
-          checked={census}
-          onCheckedChange={setCensus}
-          aria-label="Show NYC street tree census"
-        />
-        <span>
-          Street trees{" "}
-          <small>
-            2015 census
-            {census
-              ? loading
-                ? " · loading"
-                : ` · ${count}${count === 500 ? "+" : ""} records`
-              : ""}
-          </small>
-        </span>
-      </label>
+      {focusSite &&
+        selected.lat > 40.45 &&
+        selected.lat < 40.95 &&
+        selected.lng > -74.3 &&
+        selected.lng < -73.65 && (
+          <label className="census-toggle">
+            <Switch
+              checked={census}
+              onCheckedChange={setCensus}
+              aria-label="Show NYC street tree census"
+            />
+            <span>
+              NYC street trees{" "}
+              <small>
+                2015 census
+                {census
+                  ? loading
+                    ? " · loading"
+                    : ` · ${count}${count === 500 ? "+" : ""} records`
+                  : ""}
+              </small>
+            </span>
+          </label>
+        )}
       <div className="map-legend">
-        <strong>Planting need</strong>
+        <strong>Reported site priority</strong>
         <span>
           <i className="high" />
           High
@@ -234,7 +303,7 @@ export default function MapView({
           Low
         </span>
       </div>
-      {census && summary && !loading && (
+      {census && focusSite && summary && !loading && (
         <div className="geo-summary">
           <strong>
             {summary.capped ? "At least " : ""}
@@ -242,6 +311,12 @@ export default function MapView({
           </strong>
           <span>{summary.deadOrStump} dead trees / stumps recorded</span>
           <small>Historical census · not current planting availability</small>
+        </div>
+      )}
+      {vegetationFailed && (
+        <div className="map-error">
+          Some vegetation tiles are unavailable for this date. Missing imagery
+          does not mean low vegetation.
         </div>
       )}
       {failed && (
