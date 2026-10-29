@@ -283,379 +283,392 @@ export default function Treefinder({
   );
 
   return (
-    <div className="phase-shell">
+    <>
       <Toaster position="bottom-right" />
-      <aside className="phase-sidebar">
-        <div className="phase-brand">
-          <span>
-            <Leaf />
-          </span>
-          <strong>treefinder.</strong>
-        </div>
-        <nav aria-label="Main navigation">
-          <button
-            className={view === "overview" ? "active" : ""}
-            onClick={() => setView("overview")}
-          >
-            <LayoutDashboard />
-            Overview
-          </button>
-          <button
-            className={view === "opportunities" ? "active" : ""}
-            onClick={() => setView("opportunities")}
-          >
-            <CalendarDays />
-            Opportunities
-          </button>
-          <button
-            className={view === "admin" ? "active" : ""}
-            onClick={() => setView("admin")}
-          >
-            <Database />
-            Admin database
-          </button>
-        </nav>
-        <div className="database-state">
-          <span className={error ? "offline" : ""} />
-          <div>
-            <strong>
-              {error ? "Database unavailable" : "Database connected"}
-            </strong>
-            <small>volunteer_db · 7 tables</small>
+      <div className="phase-shell">
+        <aside className="phase-sidebar">
+          <div className="phase-brand">
+            <span>
+              <Leaf />
+            </span>
+            <strong>treefinder.</strong>
           </div>
-        </div>
-        <div className="phase-user">
-          <span>{user.name[0].toUpperCase()}</span>
-          <div>
-            <strong>{user.name}</strong>
-            <small>Administrator</small>
+          <nav aria-label="Main navigation">
+            <button
+              className={view === "overview" ? "active" : ""}
+              onClick={() => setView("overview")}
+            >
+              <LayoutDashboard />
+              Overview
+            </button>
+            <button
+              className={view === "opportunities" ? "active" : ""}
+              onClick={() => setView("opportunities")}
+            >
+              <CalendarDays />
+              Opportunities
+            </button>
+            <button
+              className={view === "admin" ? "active" : ""}
+              onClick={() => setView("admin")}
+            >
+              <Database />
+              Admin database
+            </button>
+          </nav>
+          <div className="database-state">
+            <span className={error ? "offline" : ""} />
+            <div>
+              <strong>
+                {error ? "Database unavailable" : "Database connected"}
+              </strong>
+              <small>volunteer_db · 7 tables</small>
+            </div>
           </div>
-          <a href="/signout-with-chatgpt?return_to=%2F" aria-label="Sign out">
-            <LogOut />
-          </a>
-        </div>
-      </aside>
-      <main className="phase-main">
-        <header>
-          <div>
-            <p className="kicker">PHASE 2 · DATABASE OPERATIONS</p>
-            <h1>
-              {view === "overview"
-                ? "Volunteer program overview"
-                : view === "opportunities"
-                  ? "Volunteer opportunities"
-                  : "Admin database"}
-            </h1>
-            <p>
-              {view === "admin"
-                ? "View, insert, and permanently delete records from the major tables."
-                : "Live information from the project database."}
-            </p>
+          <div className="phase-user">
+            <span>{user.name[0].toUpperCase()}</span>
+            <div>
+              <strong>{user.name}</strong>
+              <small>Administrator</small>
+            </div>
+            <a href="/signout-with-chatgpt?return_to=%2F" aria-label="Sign out">
+              <LogOut />
+            </a>
           </div>
-          {view === "admin" && (
-            <Button onClick={() => setInsertOpen(true)}>
-              <Plus />
-              Insert record
-            </Button>
+        </aside>
+        <main className="phase-main">
+          <header>
+            <div>
+              <p className="kicker">PHASE 2 · DATABASE OPERATIONS</p>
+              <h1>
+                {view === "overview"
+                  ? "Volunteer program overview"
+                  : view === "opportunities"
+                    ? "Volunteer opportunities"
+                    : "Admin database"}
+              </h1>
+              <p>
+                {view === "admin"
+                  ? "View, insert, and permanently delete records from the major tables."
+                  : "Live information from the project database."}
+              </p>
+            </div>
+            {view === "admin" && (
+              <Button onClick={() => setInsertOpen(true)}>
+                <Plus />
+                Insert record
+              </Button>
+            )}
+          </header>
+          {error && (
+            <div className="phase-error">
+              <strong>Could not load the database.</strong>
+              <span>{error}</span>
+              <Button variant="outline" onClick={load}>
+                Try again
+              </Button>
+            </div>
           )}
-        </header>
-        {error && (
-          <div className="phase-error">
-            <strong>Could not load the database.</strong>
-            <span>{error}</span>
-            <Button variant="outline" onClick={load}>
-              Try again
-            </Button>
-          </div>
-        )}
-        {loading ? (
-          <div className="phase-loading">
-            <LoaderCircle className="animate-spin" />
-            Reading database…
-          </div>
-        ) : view === "overview" ? (
-          <>
-            <section className="summary-grid">
-              <Summary
-                icon={Users}
-                label="Users"
-                value={counts.Users ?? 0}
-                detail="sample volunteer profiles"
-              />
-              <Summary
-                icon={Building2}
-                label="Organizations"
-                value={counts.Organization ?? 0}
-                detail="community partners"
-              />
-              <Summary
-                icon={CalendarDays}
-                label="Opportunities"
-                value={counts.VolunteerOpportunity ?? 0}
-                detail="past and upcoming events"
-              />
-              <Summary
-                icon={UserRoundCheck}
-                label="Registrations"
-                value={counts.Registration ?? 0}
-                detail={`${totalHours.toFixed(1)} volunteer hours logged`}
-              />
-            </section>
-            <section className="overview-grid">
-              <div className="panel">
-                <div className="panel-head">
-                  <div>
-                    <h2>Upcoming opportunities</h2>
-                    <p>Joined with organization and registration data</p>
+          {loading ? (
+            <div className="phase-loading">
+              <LoaderCircle className="animate-spin" />
+              Reading database…
+            </div>
+          ) : view === "overview" ? (
+            <>
+              <section className="summary-grid">
+                <Summary
+                  icon={Users}
+                  label="Users"
+                  value={counts.Users ?? 0}
+                  detail="sample volunteer profiles"
+                />
+                <Summary
+                  icon={Building2}
+                  label="Organizations"
+                  value={counts.Organization ?? 0}
+                  detail="community partners"
+                />
+                <Summary
+                  icon={CalendarDays}
+                  label="Opportunities"
+                  value={counts.VolunteerOpportunity ?? 0}
+                  detail="past and upcoming events"
+                />
+                <Summary
+                  icon={UserRoundCheck}
+                  label="Registrations"
+                  value={counts.Registration ?? 0}
+                  detail={`${totalHours.toFixed(1)} volunteer hours logged`}
+                />
+              </section>
+              <section className="overview-grid">
+                <div className="panel">
+                  <div className="panel-head">
+                    <div>
+                      <h2>Upcoming opportunities</h2>
+                      <p>Joined with organization and registration data</p>
+                    </div>
+                    <button onClick={() => setView("opportunities")}>
+                      View all
+                    </button>
                   </div>
-                  <button onClick={() => setView("opportunities")}>
-                    View all
-                  </button>
+                  <div className="event-list">
+                    {upcoming.map((event) => (
+                      <article key={event.OpportunityID}>
+                        <time>
+                          <strong>
+                            {new Date(
+                              event.EventDate + "T12:00:00",
+                            ).toLocaleDateString("en-US", { month: "short" })}
+                          </strong>
+                          <span>
+                            {new Date(event.EventDate + "T12:00:00").getDate()}
+                          </span>
+                        </time>
+                        <div>
+                          <h3>{event.Title}</h3>
+                          <p>
+                            {event.Organization} · {event.Location}
+                          </p>
+                        </div>
+                        <Badge variant="secondary">
+                          {event.SignUps} registered
+                        </Badge>
+                      </article>
+                    ))}
+                  </div>
                 </div>
-                <div className="event-list">
-                  {upcoming.map((event) => (
-                    <article key={event.OpportunityID}>
-                      <time>
-                        <strong>
-                          {new Date(
-                            event.EventDate + "T12:00:00",
-                          ).toLocaleDateString("en-US", { month: "short" })}
-                        </strong>
+                <div className="panel status-panel">
+                  <h2>Registration status</h2>
+                  <p>Current rows grouped by status</p>
+                  {["Completed", "Confirmed", "Pending", "Cancelled"].map(
+                    (s) => (
+                      <div className="status-row" key={s}>
                         <span>
-                          {new Date(event.EventDate + "T12:00:00").getDate()}
+                          <i className={s.toLowerCase()} />
+                          {s}
                         </span>
-                      </time>
-                      <div>
-                        <h3>{event.Title}</h3>
-                        <p>
-                          {event.Organization} · {event.Location}
-                        </p>
+                        <strong>{statusCounts[s] ?? 0}</strong>
                       </div>
-                      <Badge variant="secondary">
-                        {event.SignUps} registered
-                      </Badge>
-                    </article>
-                  ))}
+                    ),
+                  )}
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setTable("Registration");
+                      setView("admin");
+                    }}
+                  >
+                    Open registrations
+                  </Button>
+                </div>
+              </section>
+            </>
+          ) : view === "opportunities" ? (
+            <section className="panel opportunity-panel">
+              <div className="panel-head">
+                <div>
+                  <h2>All opportunities</h2>
+                  <p>
+                    {data.tables.VolunteerOpportunity.length} database records
+                  </p>
                 </div>
               </div>
-              <div className="panel status-panel">
-                <h2>Registration status</h2>
-                <p>Current rows grouped by status</p>
-                {["Completed", "Confirmed", "Pending", "Cancelled"].map((s) => (
-                  <div className="status-row" key={s}>
-                    <span>
-                      <i className={s.toLowerCase()} />
-                      {s}
-                    </span>
-                    <strong>{statusCounts[s] ?? 0}</strong>
-                  </div>
+              <div className="opportunity-cards">
+                {data.tables.VolunteerOpportunity.map((event) => (
+                  <article key={event.OpportunityID}>
+                    <div className="event-date">
+                      {new Date(
+                        event.EventDate + "T12:00:00",
+                      ).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </div>
+                    <h3>{event.Title}</h3>
+                    <p>
+                      <Building2 /> {event.Organization}
+                    </p>
+                    <p>
+                      <CalendarDays /> {event.Location}
+                    </p>
+                    <span>{event.SignUps} registrations</span>
+                  </article>
                 ))}
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setTable("Registration");
-                    setView("admin");
+              </div>
+            </section>
+          ) : (
+            <>
+              <section className="admin-intro">
+                <div>
+                  <Database />
+                  <span>
+                    <strong>MySQL schema</strong>
+                    <small>
+                      The interface follows volunteer_db.sql without changing
+                      that file.
+                    </small>
+                  </span>
+                </div>
+                <div>
+                  <ShieldCheck />
+                  <span>
+                    <strong>Permanent deletes</strong>
+                    <small>Foreign-key cascade rules remain in effect.</small>
+                  </span>
+                </div>
+              </section>
+              <section className="panel admin-panel">
+                <Tabs
+                  value={table}
+                  onValueChange={(v) => {
+                    setTable(v as TableName);
+                    setQuery("");
                   }}
                 >
-                  Open registrations
-                </Button>
-              </div>
-            </section>
-          </>
-        ) : view === "opportunities" ? (
-          <section className="panel opportunity-panel">
-            <div className="panel-head">
-              <div>
-                <h2>All opportunities</h2>
-                <p>
-                  {data.tables.VolunteerOpportunity.length} database records
-                </p>
-              </div>
-            </div>
-            <div className="opportunity-cards">
-              {data.tables.VolunteerOpportunity.map((event) => (
-                <article key={event.OpportunityID}>
-                  <div className="event-date">
-                    {new Date(event.EventDate + "T12:00:00").toLocaleDateString(
-                      "en-US",
-                      { month: "short", day: "numeric", year: "numeric" },
-                    )}
-                  </div>
-                  <h3>{event.Title}</h3>
-                  <p>
-                    <Building2 /> {event.Organization}
-                  </p>
-                  <p>
-                    <CalendarDays /> {event.Location}
-                  </p>
-                  <span>{event.SignUps} registrations</span>
-                </article>
-              ))}
-            </div>
-          </section>
-        ) : (
-          <>
-            <section className="admin-intro">
-              <div>
-                <Database />
-                <span>
-                  <strong>MySQL schema</strong>
-                  <small>
-                    The interface follows volunteer_db.sql without changing that
-                    file.
-                  </small>
-                </span>
-              </div>
-              <div>
-                <ShieldCheck />
-                <span>
-                  <strong>Permanent deletes</strong>
-                  <small>Foreign-key cascade rules remain in effect.</small>
-                </span>
-              </div>
-            </section>
-            <section className="panel admin-panel">
-              <Tabs
-                value={table}
-                onValueChange={(v) => {
-                  setTable(v as TableName);
-                  setQuery("");
+                  <TabsList>
+                    {(Object.keys(tableInfo) as TableName[]).map((name) => {
+                      const Icon = tableInfo[name].icon;
+                      return (
+                        <TabsTrigger key={name} value={name}>
+                          <Icon />
+                          {tableInfo[name].label}
+                          <span>{data.tables[name].length}</span>
+                        </TabsTrigger>
+                      );
+                    })}
+                  </TabsList>
+                </Tabs>
+                <div className="admin-toolbar">
+                  <label>
+                    <Search />
+                    <Input
+                      aria-label={`Search ${tableInfo[table].label}`}
+                      placeholder={`Search ${tableInfo[table].label.toLowerCase()}…`}
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                    />
+                  </label>
+                  <Button onClick={() => setInsertOpen(true)}>
+                    <Plus />
+                    Add {tableInfo[table].singular}
+                  </Button>
+                </div>
+                <div className="data-table-wrap">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        {tableInfo[table].columns.map((c) => (
+                          <TableHead key={c.key}>{c.label}</TableHead>
+                        ))}
+                        <TableHead className="action-col">Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.map((row) => (
+                        <TableRow key={row[tableInfo[table].id]}>
+                          {tableInfo[table].columns.map((c) => (
+                            <TableCell key={c.key}>
+                              {c.key === "Status" ? (
+                                <Badge variant="outline">{row[c.key]}</Badge>
+                              ) : (
+                                String(row[c.key] ?? "—")
+                              )}
+                            </TableCell>
+                          ))}
+                          <TableCell className="action-col">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="delete-button"
+                              aria-label={`Delete ${tableInfo[table].singular}`}
+                              onClick={() =>
+                                setDeleteTarget({
+                                  table,
+                                  id: Number(row[tableInfo[table].id]),
+                                  name:
+                                    row.Name ||
+                                    row.Title ||
+                                    row.Member ||
+                                    row.Volunteer ||
+                                    `record ${row[tableInfo[table].id]}`,
+                                })
+                              }
+                            >
+                              <Trash2 />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {!filtered.length && (
+                        <TableRow>
+                          <TableCell
+                            colSpan={tableInfo[table].columns.length + 1}
+                            className="empty-cell"
+                          >
+                            No matching records.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                <footer className="table-footer">
+                  Showing {filtered.length} of {rows.length} rows in{" "}
+                  <code>{table}</code>
+                </footer>
+              </section>
+            </>
+          )}
+        </main>
+        <InsertDialog
+          table={table}
+          data={data}
+          open={insertOpen}
+          saving={saving}
+          onOpenChange={setInsertOpen}
+          onSave={insertRecord}
+        />
+        <AlertDialog
+          open={!!deleteTarget}
+          onOpenChange={(open) => !open && setDeleteTarget(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Permanently delete this record?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                <strong>{deleteTarget?.name}</strong> will be removed from{" "}
+                <code>{deleteTarget?.table}</code>. This cannot be undone.
+                Related records may also be deleted according to the foreign-key
+                cascade rules.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="confirm-delete"
+                disabled={saving}
+                onClick={(e) => {
+                  e.preventDefault();
+                  deleteRecord();
                 }}
               >
-                <TabsList>
-                  {(Object.keys(tableInfo) as TableName[]).map((name) => {
-                    const Icon = tableInfo[name].icon;
-                    return (
-                      <TabsTrigger key={name} value={name}>
-                        <Icon />
-                        {tableInfo[name].label}
-                        <span>{data.tables[name].length}</span>
-                      </TabsTrigger>
-                    );
-                  })}
-                </TabsList>
-              </Tabs>
-              <div className="admin-toolbar">
-                <label>
-                  <Search />
-                  <Input
-                    aria-label={`Search ${tableInfo[table].label}`}
-                    placeholder={`Search ${tableInfo[table].label.toLowerCase()}…`}
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                </label>
-                <Button onClick={() => setInsertOpen(true)}>
-                  <Plus />
-                  Add {tableInfo[table].singular}
-                </Button>
-              </div>
-              <div className="data-table-wrap">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      {tableInfo[table].columns.map((c) => (
-                        <TableHead key={c.key}>{c.label}</TableHead>
-                      ))}
-                      <TableHead className="action-col">Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map((row) => (
-                      <TableRow key={row[tableInfo[table].id]}>
-                        {tableInfo[table].columns.map((c) => (
-                          <TableCell key={c.key}>
-                            {c.key === "Status" ? (
-                              <Badge variant="outline">{row[c.key]}</Badge>
-                            ) : (
-                              String(row[c.key] ?? "—")
-                            )}
-                          </TableCell>
-                        ))}
-                        <TableCell className="action-col">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="delete-button"
-                            aria-label={`Delete ${tableInfo[table].singular}`}
-                            onClick={() =>
-                              setDeleteTarget({
-                                table,
-                                id: Number(row[tableInfo[table].id]),
-                                name:
-                                  row.Name ||
-                                  row.Title ||
-                                  row.Member ||
-                                  row.Volunteer ||
-                                  `record ${row[tableInfo[table].id]}`,
-                              })
-                            }
-                          >
-                            <Trash2 />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!filtered.length && (
-                      <TableRow>
-                        <TableCell
-                          colSpan={tableInfo[table].columns.length + 1}
-                          className="empty-cell"
-                        >
-                          No matching records.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-              <footer className="table-footer">
-                Showing {filtered.length} of {rows.length} rows in{" "}
-                <code>{table}</code>
-              </footer>
-            </section>
-          </>
-        )}
-      </main>
-      <InsertDialog
-        table={table}
-        data={data}
-        open={insertOpen}
-        saving={saving}
-        onOpenChange={setInsertOpen}
-        onSave={insertRecord}
-      />
-      <AlertDialog
-        open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Permanently delete this record?</AlertDialogTitle>
-            <AlertDialogDescription>
-              <strong>{deleteTarget?.name}</strong> will be removed from{" "}
-              <code>{deleteTarget?.table}</code>. This cannot be undone. Related
-              records may also be deleted according to the foreign-key cascade
-              rules.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="confirm-delete"
-              disabled={saving}
-              onClick={(e) => {
-                e.preventDefault();
-                deleteRecord();
-              }}
-            >
-              {saving ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
-              Delete permanently
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+                {saving ? (
+                  <LoaderCircle className="animate-spin" />
+                ) : (
+                  <Trash2 />
+                )}
+                Delete permanently
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </>
   );
 }
 
