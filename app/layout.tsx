@@ -2,11 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Treefinder — Grow a greener neighborhood",
-  description: "Explore planting sites, discover suitable native trees, and connect with your local tree community.",
-  other: {
-    "codex-preview": "development",
-  },
+  title: "Treefinder — Volunteer Database",
+  description:
+    "Manage volunteer organizations, opportunities, members, and registrations.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

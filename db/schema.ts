@@ -1,40 +1,111 @@
-import { sqliteTable, text, index, uniqueIndex } from "drizzle-orm/sqlite-core";
-export const profiles = sqliteTable("profiles", {
-  id: text("id").primaryKey(),
-  email: text("email").notNull(),
-  name: text("name").notNull(),
-  bio: text("bio").notNull().default(""),
-  role: text("role").notNull().default("general"),
-  certification: text("certification"),
-  requestedRole: text("requested_role"),
+import {
+  integer,
+  real,
+  sqliteTable,
+  text,
+  primaryKey,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
+
+export const organizations = sqliteTable("Organization", {
+  orgId: integer("OrgID").primaryKey({ autoIncrement: true }),
+  name: text("Name").notNull().unique(),
+  type: text("Type").notNull(),
+  contactEmail: text("ContactEmail").notNull().unique(),
 });
-export const records = sqliteTable(
-  "records",
+
+export const users = sqliteTable("Users", {
+  userId: integer("UserID").primaryKey({ autoIncrement: true }),
+  firstName: text("FName").notNull(),
+  lastName: text("LName").notNull(),
+  email: text("Email").notNull().unique(),
+});
+
+export const roles = sqliteTable("Role", {
+  roleId: integer("RoleID").primaryKey(),
+  roleName: text("RoleName").notNull().unique(),
+});
+
+export const userRoles = sqliteTable(
+  "UserRole",
   {
-    id: text("id").primaryKey(),
-    kind: text("kind").notNull(),
-    owner: text("owner").notNull(),
-    name: text("name").notNull(),
-    payload: text("payload").notNull(),
-    status: text("status").notNull().default("pending"),
-    created: text("created").notNull(),
+    userId: integer("UserID")
+      .notNull()
+      .references(() => users.userId, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    roleId: integer("RoleID")
+      .notNull()
+      .references(() => roles.roleId, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
   },
-  (t) => [
-    index("idx_records_kind_status").on(t.kind, t.status),
-    index("idx_records_owner_kind").on(t.owner, t.kind),
+  (table) => [primaryKey({ columns: [table.userId, table.roleId] })],
+);
+
+export const opportunities = sqliteTable("VolunteerOpportunity", {
+  opportunityId: integer("OpportunityID").primaryKey({ autoIncrement: true }),
+  orgId: integer("OrgID")
+    .notNull()
+    .references(() => organizations.orgId, {
+      onDelete: "cascade",
+      onUpdate: "cascade",
+    }),
+  title: text("Title").notNull(),
+  eventDate: text("EventDate").notNull(),
+  location: text("Location").notNull(),
+});
+
+export const organizationMembers = sqliteTable(
+  "OrganizationMember",
+  {
+    membershipId: integer("MembershipID").primaryKey({ autoIncrement: true }),
+    orgId: integer("OrgID")
+      .notNull()
+      .references(() => organizations.orgId, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    userId: integer("UserID")
+      .notNull()
+      .references(() => users.userId, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    joinDate: text("JoinDate").notNull(),
+    orgRole: text("OrgRole").notNull().default("Member"),
+  },
+  (table) => [uniqueIndex("UQ_Member_OrgUser").on(table.orgId, table.userId)],
+);
+
+export const registrations = sqliteTable(
+  "Registration",
+  {
+    registrationId: integer("RegistrationID").primaryKey({
+      autoIncrement: true,
+    }),
+    userId: integer("UserID")
+      .notNull()
+      .references(() => users.userId, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    opportunityId: integer("OpportunityID")
+      .notNull()
+      .references(() => opportunities.opportunityId, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    registrationDate: text("RegistrationDate").notNull(),
+    status: text("Status").notNull().default("Pending"),
+    hoursLogged: real("HoursLogged").notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("UQ_Registration_UserOpp").on(
+      table.userId,
+      table.opportunityId,
+    ),
   ],
 );
-export const registrations = sqliteTable(
-  "registrations",
-  {
-    id: text("id").primaryKey(),
-    owner: text("owner").notNull(),
-    event: text("event").notNull(),
-    created: text("created").notNull(),
-  },
-  (t) => [uniqueIndex("idx_registration_owner_event").on(t.owner, t.event)],
-);
-export const votes = sqliteTable("votes", {
-  owner: text("owner").primaryKey(),
-  species: text("species").notNull(),
-});

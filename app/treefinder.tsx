@@ -1,798 +1,994 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
-import WorkspaceViews, {
-  blankCommunity,
-  parseRecord,
-  catalogData,
-  type Community,
-} from "./workspace-views";
-import ContributionForm from "./contribution-form";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { distance, type Site } from "@/lib/data";
-import MapView from "./map-view";
-import SatellitePanel from "./satellite-panel";
-import { stateViews, nationalView, type MapTarget } from "@/lib/national";
-import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
 import { Toaster } from "@/components/ui/sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
-  TreePine,
-  Map,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import {
+  Building2,
+  CalendarDays,
+  Database,
+  LayoutDashboard,
   Leaf,
-  HandHeart,
-  MessageCircle,
-  BookOpen,
-  ArrowUpRight,
+  LoaderCircle,
+  LogOut,
   Plus,
   Search,
-  MapPin,
-  SlidersHorizontal,
-  ChevronRight,
-  Sprout,
-  LocateFixed,
-  Sun,
-  Droplets,
-  Layers,
-  Users,
   ShieldCheck,
+  Trash2,
+  Users,
+  UserRoundCheck,
 } from "lucide-react";
-import {
-  SidebarProvider,
-  Sidebar,
-  SidebarHeader,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-  SidebarFooter,
-  SidebarTrigger,
-  useSidebar,
-} from "@/components/ui/sidebar";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "@/components/ui/select";
-import { sites, species, matchTree } from "@/lib/data";
-function MobileNavigation({ view }: { view: string }) {
-  const { setOpenMobile } = useSidebar();
-  useEffect(() => setOpenMobile(false), [view, setOpenMobile]);
-  return null;
-}
+
+type TableName =
+  | "Organization"
+  | "Users"
+  | "VolunteerOpportunity"
+  | "OrganizationMember"
+  | "Registration";
+type Snapshot = {
+  counts: { TableName: string; RowCount: number }[];
+  tables: Record<TableName, Record<string, any>[]>;
+  lookups: {
+    organizations: { id: number; label: string }[];
+    users: { id: number; label: string }[];
+    opportunities: { id: number; label: string }[];
+    roles: { RoleID: number; RoleName: string }[];
+  };
+  admin?: { email: string; fullName?: string | null };
+};
+
+const tableInfo: Record<
+  TableName,
+  {
+    label: string;
+    singular: string;
+    id: string;
+    icon: any;
+    columns: { key: string; label: string }[];
+  }
+> = {
+  Organization: {
+    label: "Organizations",
+    singular: "organization",
+    id: "OrgID",
+    icon: Building2,
+    columns: [
+      { key: "OrgID", label: "ID" },
+      { key: "Name", label: "Name" },
+      { key: "Type", label: "Type" },
+      { key: "ContactEmail", label: "Contact email" },
+    ],
+  },
+  Users: {
+    label: "Users",
+    singular: "user",
+    id: "UserID",
+    icon: Users,
+    columns: [
+      { key: "UserID", label: "ID" },
+      { key: "FName", label: "First name" },
+      { key: "LName", label: "Last name" },
+      { key: "Email", label: "Email" },
+      { key: "Roles", label: "Roles" },
+    ],
+  },
+  VolunteerOpportunity: {
+    label: "Opportunities",
+    singular: "opportunity",
+    id: "OpportunityID",
+    icon: CalendarDays,
+    columns: [
+      { key: "OpportunityID", label: "ID" },
+      { key: "Organization", label: "Organization" },
+      { key: "Title", label: "Title" },
+      { key: "EventDate", label: "Event date" },
+      { key: "Location", label: "Location" },
+      { key: "SignUps", label: "Sign-ups" },
+    ],
+  },
+  OrganizationMember: {
+    label: "Members",
+    singular: "organization member",
+    id: "MembershipID",
+    icon: UserRoundCheck,
+    columns: [
+      { key: "MembershipID", label: "ID" },
+      { key: "Organization", label: "Organization" },
+      { key: "Member", label: "Member" },
+      { key: "JoinDate", label: "Join date" },
+      { key: "OrgRole", label: "Role" },
+    ],
+  },
+  Registration: {
+    label: "Registrations",
+    singular: "registration",
+    id: "RegistrationID",
+    icon: ShieldCheck,
+    columns: [
+      { key: "RegistrationID", label: "ID" },
+      { key: "Volunteer", label: "Volunteer" },
+      { key: "Opportunity", label: "Opportunity" },
+      { key: "RegistrationDate", label: "Registered" },
+      { key: "Status", label: "Status" },
+      { key: "HoursLogged", label: "Hours" },
+    ],
+  },
+};
+
+const emptyData = (): Snapshot => ({
+  counts: [],
+  tables: {
+    Organization: [],
+    Users: [],
+    VolunteerOpportunity: [],
+    OrganizationMember: [],
+    Registration: [],
+  },
+  lookups: { organizations: [], users: [], opportunities: [], roles: [] },
+});
+const today = () => new Date().toISOString().slice(0, 10);
+
 export default function Treefinder({
   user,
 }: {
   user: { id: string; name: string; email: string } | null;
 }) {
-  const [view, setView] = useState("Explore map");
-  const [selected, setSelected] = useState(sites[0]);
-  const [priority, setPriority] = useState("All priorities");
-  const [query, setQuery] = useState("");
-  const [data, setData] = useState<Community>(blankCommunity);
+  const [view, setView] = useState<"overview" | "opportunities" | "admin">(
+    "overview",
+  );
+  const [data, setData] = useState<Snapshot>(emptyData);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [form, setForm] = useState<{ kind: string; initial: any } | null>(null);
-  const [location, setLocation] = useState<[number, number] | null>(null);
-  const [target, setTarget] = useState<MapTarget>(nationalView);
-  const [stateCode, setStateCode] = useState("USA");
-  const [focusSite, setFocusSite] = useState(false);
-  const [mapCenter, setMapCenter] = useState<[number, number]>([
-    nationalView.lat,
-    nationalView.lng,
-  ]);
-  const [ndvi, setNdvi] = useState(true);
-  const [imagery, setImagery] = useState<{
-    date: string;
-    ranges: { start: string; end: string }[];
+  const [table, setTable] = useState<TableName>("Organization");
+  const [query, setQuery] = useState("");
+  const [insertOpen, setInsertOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    table: TableName;
+    id: number;
+    name: string;
   } | null>(null);
-  const [date, setDate] = useState("");
-  const [imageryError, setImageryError] = useState("");
-  const [opacity, setOpacity] = useState(0.65);
-  const loadImagery = useCallback(async () => {
-    setImageryError("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
     try {
-      const r = await fetch("/api/vegetation");
-      const j: any = await r.json();
-      if (!r.ok) throw new Error(j.error);
-      setImagery(j);
-      setDate(j.date);
-    } catch (e: any) {
-      setImageryError(e.message);
-    }
-  }, []);
-  useEffect(() => {
-    loadImagery();
-  }, [loadImagery]);
-  const chooseState = (code: string) => {
-    const state = stateViews.find((s) => s.code === code);
-    setStateCode(code);
-    setFocusSite(false);
-    setQuery("");
-    const next = state ? { ...state, label: state.name } : { ...nationalView };
-    setTarget(next);
-    setMapCenter([next.lat, next.lng]);
-    setLocation(state ? [state.lat, state.lng] : null);
-  };
-  const selectSite = (site: Site) => {
-    setSelected(site);
-    setFocusSite(true);
-  };
-  const suggestAtCenter = () =>
-    setForm({
-      kind: "site",
-      initial: {
-        lat: mapCenter[0].toFixed(5),
-        lng: mapCenter[1].toFixed(5),
-        space: 35,
-      },
-    });
-  const refresh = useCallback(async () => {
-    try {
-      const r = await fetch("/api/community");
+      const r = await fetch("/api/admin-data");
       const j: any = await r.json();
       if (!r.ok) throw new Error(j.error);
       setData(j);
-      setError("");
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setLoading(false);
     }
   }, []);
   useEffect(() => {
-    refresh();
-  }, [refresh]);
-  async function action(payload: any) {
+    if (user) load();
+    else setLoading(false);
+  }, [user, load]);
+
+  function replaceSnapshot(j: any) {
+    setData({ ...j.snapshot, admin: data.admin });
+  }
+  async function insertRecord(form: Record<string, any>) {
+    setSaving(true);
     try {
-      const r = await fetch("/api/community", {
+      const r = await fetch("/api/admin-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ table, data: form }),
       });
       const j: any = await r.json();
       if (!r.ok) throw new Error(j.error);
+      replaceSnapshot(j);
+      setInsertOpen(false);
       toast.success(
-        payload.action === "register"
-          ? "You are registered. Find this event in My activity."
-          : payload.action === "cancel"
-            ? "Registration cancelled."
-            : payload.action === "vote"
-              ? "Your favorite tree vote has been saved."
-              : j.status === "pending"
-                ? "Submitted. Your contribution is awaiting review."
-                : "Saved to your community.",
+        `${tableInfo[table].singular[0].toUpperCase() + tableInfo[table].singular.slice(1)} inserted into the database.`,
       );
-      await refresh();
-      return j;
     } catch (e: any) {
       toast.error(e.message);
-      return { ok: false };
+    } finally {
+      setSaving(false);
     }
   }
-  const allSites: Site[] = [
-    ...sites,
-    ...data.records
-      .filter((r) => r.kind === "site")
-      .map((r) => ({
-        id: r.id,
-        name: r.name,
-        ...parseRecord(r),
-        example: false,
-      })),
-  ];
-  const filtered = allSites
-    .filter(
-      (s) =>
-        (!location || distance(...location, s.lat, s.lng) <= 100) &&
-        (priority === "All priorities" || s.priority === priority) &&
-        `${s.name} ${s.area}`.toLowerCase().includes(query.toLowerCase()),
-    )
-    .sort((a, b) =>
-      location
-        ? distance(...location, a.lat, a.lng) -
-          distance(...location, b.lat, b.lng)
-        : 0,
+  async function deleteRecord() {
+    if (!deleteTarget) return;
+    setSaving(true);
+    try {
+      const r = await fetch("/api/admin-data", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          table: deleteTarget.table,
+          id: deleteTarget.id,
+        }),
+      });
+      const j: any = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      replaceSnapshot(j);
+      setDeleteTarget(null);
+      toast.success("Record permanently deleted.");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!user)
+    return (
+      <div className="phase-login">
+        <div className="brand-mark">
+          <Leaf />
+        </div>
+        <p className="kicker">TREEFINDER DATABASE</p>
+        <h1>Volunteer management, connected.</h1>
+        <p>
+          Sign in with the administrator account to view, insert, and delete
+          records.
+        </p>
+        <a className="login-button" href="/signin-with-chatgpt?return_to=%2F">
+          Sign in to continue
+        </a>
+      </div>
     );
-  const trees = catalogData(data);
-  useEffect(() => {
-    const ctx = (document as any).modelContext;
-    if (!ctx?.registerTool) return;
-    const lifecycle = new AbortController();
-    Promise.resolve(
-      ctx.registerTool(
-        {
-          name: "explore_planting_site",
-          description:
-            "Select a planting site and display its conditions and tree matches.",
-          inputSchema: {
-            type: "object",
-            properties: { siteId: { type: "string" } },
-            required: ["siteId"],
-            additionalProperties: false,
-          },
-          annotations: { readOnlyHint: true, untrustedContentHint: true },
-          execute(input: any) {
-            const site = allSites.find((s) => s.id === input.siteId);
-            if (!site) throw new Error("Unknown planting site");
-            selectSite(site);
-            setView("Explore map");
-            return {
-              siteId: site.id,
-              name: site.name,
-              recommendations: trees
-                .map((t) => ({ name: t.name, score: matchTree(t, site).score }))
-                .sort((a, b) => b.score - a.score)
-                .slice(0, 3),
-            };
-          },
-        },
-        { signal: lifecycle.signal },
-      ),
-    ).catch(() => {});
-    return () => lifecycle.abort();
-  }, [data.records]);
+
+  const counts = Object.fromEntries(
+    data.counts.map((x) => [x.TableName, Number(x.RowCount)]),
+  );
+  const rows = data.tables[table] ?? [];
+  const filtered = rows.filter((row) =>
+    Object.values(row).join(" ").toLowerCase().includes(query.toLowerCase()),
+  );
+  const upcoming = (data.tables.VolunteerOpportunity ?? [])
+    .filter((x) => x.EventDate >= today())
+    .slice(0, 6);
+  const totalHours = (data.tables.Registration ?? []).reduce(
+    (sum, row) => sum + Number(row.HoursLogged || 0),
+    0,
+  );
+  const statusCounts = (data.tables.Registration ?? []).reduce(
+    (acc: any, row) => ((acc[row.Status] = (acc[row.Status] || 0) + 1), acc),
+    {},
+  );
+
   return (
-    <SidebarProvider
-      style={{ "--sidebar-width": "238px" } as React.CSSProperties}
-    >
-      <MobileNavigation view={view} />
+    <div className="phase-shell">
       <Toaster position="bottom-right" />
-      <Sidebar className="app-sidebar">
-        <SidebarHeader>
-          <a href="/" className="brand">
-            <span>
-              <TreePine size={25} />
-            </span>
-            treefinder<span className="brand-period">.</span>
-          </a>
-        </SidebarHeader>
-        <SidebarContent>
-          <SidebarGroup>
-            <SidebarGroupLabel>DISCOVER</SidebarGroupLabel>
-            <SidebarMenu>
-              {[
-                [Map, "Explore map"],
-                [Leaf, "Tree catalog"],
-                [HandHeart, "Volunteer"],
-                [MessageCircle, "Community"],
-                [BookOpen, "Care guides"],
-              ].map(([Icon, label]: any) => (
-                <SidebarMenuItem key={label}>
-                  <SidebarMenuButton
-                    isActive={view === label}
-                    onClick={() => setView(label)}
-                    className="nav-item"
-                  >
-                    <Icon />
-                    <span>{label}</span>
-                    {view === label && <span className="nav-indicator" />}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroup>
-          <SidebarGroup>
-            <SidebarGroupLabel>YOUR SPACE</SidebarGroupLabel>
-            <SidebarMenu>
-              {[
-                [Users, "My activity"],
-                [ShieldCheck, "Review center"],
-              ].map(([Icon, label]: any) => (
-                <SidebarMenuItem key={label}>
-                  <SidebarMenuButton
-                    onClick={() => setView(label)}
-                    isActive={view === label}
-                    className="nav-item"
-                  >
-                    <Icon />
-                    <span>{label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroup>
-          <div className="sidebar-mission">
-            <div className="mission-icon">
-              <Sprout />
-            </div>
-            <h3>
-              A little care.
-              <br />A lasting impact.
-            </h3>
-            <p>Find your next opportunity to grow a greener neighborhood.</p>
-            <button onClick={() => setView("Volunteer")}>
-              Get involved <ArrowUpRight size={16} />
-            </button>
-          </div>
-        </SidebarContent>
-        <SidebarFooter>
-          <button
-            className="profile-button"
-            onClick={() => setView("My activity")}
-          >
-            <span className="avatar">
-              {user ? user.name[0].toUpperCase() : "TF"}
-            </span>
-            <span>
-              <strong>
-                {user
-                  ? (data.me?.name ?? user.name).split("@")[0]
-                  : "Your Treefinder"}
-              </strong>
-              <small>
-                {user
-                  ? data.me?.role === "admin"
-                    ? "Administrator"
-                    : data.me?.role === "arborist"
-                      ? "Certified arborist"
-                      : "Community member"
-                  : "Join the community"}
-              </small>
-            </span>
-            <ChevronRight size={16} />
-          </button>
-        </SidebarFooter>
-      </Sidebar>
-      <div className="app-main">
-        <header className="topbar">
-          <div className="mobile-toggle">
-            <SidebarTrigger />
-          </div>
-          <span className="breadcrumb">
-            Discover <ChevronRight size={14} /> <strong>{view}</strong>
+      <aside className="phase-sidebar">
+        <div className="phase-brand">
+          <span>
+            <Leaf />
           </span>
-          <div className="top-actions">
-            <span className="location-label">
-              <MapPin size={16} /> {target.label}
-            </span>
-            {user ? (
-              <span className="mini-avatar">{user.name[0].toUpperCase()}</span>
-            ) : (
-              <a
-                href="/signin-with-chatgpt?return_to=%2F"
-                target="_top"
-                className="text-button"
-              >
-                Sign in <ArrowUpRight size={15} />
-              </a>
-            )}
+          <strong>treefinder.</strong>
+        </div>
+        <nav aria-label="Main navigation">
+          <button
+            className={view === "overview" ? "active" : ""}
+            onClick={() => setView("overview")}
+          >
+            <LayoutDashboard />
+            Overview
+          </button>
+          <button
+            className={view === "opportunities" ? "active" : ""}
+            onClick={() => setView("opportunities")}
+          >
+            <CalendarDays />
+            Opportunities
+          </button>
+          <button
+            className={view === "admin" ? "active" : ""}
+            onClick={() => setView("admin")}
+          >
+            <Database />
+            Admin database
+          </button>
+        </nav>
+        <div className="database-state">
+          <span className={error ? "offline" : ""} />
+          <div>
+            <strong>
+              {error ? "Database unavailable" : "Database connected"}
+            </strong>
+            <small>volunteer_db · 7 tables</small>
           </div>
-        </header>
-        <main>
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                <span /> GROW A GREENER CITY
-              </div>
-              <h1>
-                {view === "Explore map"
-                  ? "Find a place to make a difference."
-                  : view === "Tree catalog"
-                    ? "Meet your next neighborhood tree."
-                    : view === "Volunteer"
-                      ? "Your time can help a tree take root."
-                      : view === "Community"
-                        ? "Good questions. Greener neighborhoods."
-                        : view === "My activity"
-                          ? "Your roots in the community."
-                          : view === "Care guides"
-                            ? "A little knowledge goes a long way."
-                            : "Keep our community growing well."}
-              </h1>
-              <p>
-                {view === "Explore map"
-                  ? "Discover where trees are needed. Find the right tree. Help it take root."
-                  : view === "Tree catalog"
-                    ? "Explore native species, growing conditions, and the life each tree supports."
-                    : view === "Volunteer"
-                      ? "Find local events and organizations. Put your knowledge into action."
-                      : view === "Community"
-                        ? "Learn from neighbors and certified arborists. Share what you know."
-                        : view === "My activity"
-                          ? "Manage your profile, contributions, and volunteer participation."
-                          : view === "Care guides"
-                            ? "Practical guidance for planting and caring for the trees around you."
-                            : "Review contributions, verify information, and support trusted stewardship."}
-              </p>
-            </div>
-            <button
-              className="primary-btn"
-              onClick={() =>
-                setForm({
-                  kind: "site",
-                  initial: focusSite
-                    ? {
-                        lat: selected.lat,
-                        lng: selected.lng,
-                        zone: selected.zone,
-                        space: 35,
-                      }
-                    : {
-                        lat: mapCenter[0].toFixed(5),
-                        lng: mapCenter[1].toFixed(5),
-                        space: 35,
-                      },
-                })
-              }
-            >
-              <Plus size={17} /> Suggest a planting site
-            </button>
+        </div>
+        <div className="phase-user">
+          <span>{user.name[0].toUpperCase()}</span>
+          <div>
+            <strong>{user.name}</strong>
+            <small>Administrator</small>
           </div>
-          {error && (
-            <div className="storage-error">
-              <span>{error}</span>
-              <button onClick={refresh}>Try again</button>
-            </div>
+          <a href="/signout-with-chatgpt?return_to=%2F" aria-label="Sign out">
+            <LogOut />
+          </a>
+        </div>
+      </aside>
+      <main className="phase-main">
+        <header>
+          <div>
+            <p className="kicker">PHASE 2 · DATABASE OPERATIONS</p>
+            <h1>
+              {view === "overview"
+                ? "Volunteer program overview"
+                : view === "opportunities"
+                  ? "Volunteer opportunities"
+                  : "Admin database"}
+            </h1>
+            <p>
+              {view === "admin"
+                ? "View, insert, and permanently delete records from the major tables."
+                : "Live information from the project database."}
+            </p>
+          </div>
+          {view === "admin" && (
+            <Button onClick={() => setInsertOpen(true)}>
+              <Plus />
+              Insert record
+            </Button>
           )}
-          {view === "Explore map" ? (
-            <>
-              <div className="stats-strip">
-                <div>
-                  <span className="stat-icon amber">
-                    <MapPin />
-                  </span>
+        </header>
+        {error && (
+          <div className="phase-error">
+            <strong>Could not load the database.</strong>
+            <span>{error}</span>
+            <Button variant="outline" onClick={load}>
+              Try again
+            </Button>
+          </div>
+        )}
+        {loading ? (
+          <div className="phase-loading">
+            <LoaderCircle className="animate-spin" />
+            Reading database…
+          </div>
+        ) : view === "overview" ? (
+          <>
+            <section className="summary-grid">
+              <Summary
+                icon={Users}
+                label="Users"
+                value={counts.Users ?? 0}
+                detail="sample volunteer profiles"
+              />
+              <Summary
+                icon={Building2}
+                label="Organizations"
+                value={counts.Organization ?? 0}
+                detail="community partners"
+              />
+              <Summary
+                icon={CalendarDays}
+                label="Opportunities"
+                value={counts.VolunteerOpportunity ?? 0}
+                detail="past and upcoming events"
+              />
+              <Summary
+                icon={UserRoundCheck}
+                label="Registrations"
+                value={counts.Registration ?? 0}
+                detail={`${totalHours.toFixed(1)} volunteer hours logged`}
+              />
+            </section>
+            <section className="overview-grid">
+              <div className="panel">
+                <div className="panel-head">
                   <div>
-                    <strong>
-                      {allSites.length} <small>planting areas</small>
-                    </strong>
-                    <p>Example & community-reported sites</p>
+                    <h2>Upcoming opportunities</h2>
+                    <p>Joined with organization and registration data</p>
                   </div>
+                  <button onClick={() => setView("opportunities")}>
+                    View all
+                  </button>
                 </div>
-                <div>
-                  <span className="stat-icon green">
-                    <Leaf />
-                  </span>
-                  <div>
-                    <strong>
-                      {trees.length} <small>tree species</small>
-                    </strong>
-                    <p>The right tree for the right place</p>
-                  </div>
+                <div className="event-list">
+                  {upcoming.map((event) => (
+                    <article key={event.OpportunityID}>
+                      <time>
+                        <strong>
+                          {new Date(
+                            event.EventDate + "T12:00:00",
+                          ).toLocaleDateString("en-US", { month: "short" })}
+                        </strong>
+                        <span>
+                          {new Date(event.EventDate + "T12:00:00").getDate()}
+                        </span>
+                      </time>
+                      <div>
+                        <h3>{event.Title}</h3>
+                        <p>
+                          {event.Organization} · {event.Location}
+                        </p>
+                      </div>
+                      <Badge variant="secondary">
+                        {event.SignUps} registered
+                      </Badge>
+                    </article>
+                  ))}
                 </div>
-                <div>
-                  <span className="stat-icon purple">
-                    <HandHeart />
-                  </span>
-                  <div>
-                    <strong>
-                      50 <small>states to explore</small>
-                    </strong>
-                    <p>Nationwide satellite vegetation</p>
-                  </div>
-                </div>
-                <span className="sample-tag">
-                  Initial sites & events are examples
-                </span>
               </div>
-              <section
-                className="national-toolbar"
-                aria-label="National map and vegetation controls"
-              >
-                <div className="national-picker">
-                  <span>Explore a state</span>
-                  <Select value={stateCode} onValueChange={chooseState}>
-                    <SelectTrigger aria-label="Choose a state">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="USA">
-                        United States overview
-                      </SelectItem>
-                      {stateViews.map((s) => (
-                        <SelectItem key={s.code} value={s.code}>
-                          {s.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <label className="national-ndvi">
-                  <Switch
-                    checked={ndvi}
-                    onCheckedChange={setNdvi}
-                    aria-label="Show satellite NDVI vegetation"
-                  />
-                  <span>
-                    Satellite vegetation<small>NASA · 250 m NDVI</small>
-                  </span>
-                </label>
-                <label className="national-date">
-                  <span>Observation date</span>
-                  <input
-                    type="date"
-                    aria-label="Vegetation observation date"
-                    value={date}
-                    min={imagery?.ranges[0]?.start}
-                    max={imagery?.date}
-                    disabled={!imagery}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (
-                        imagery?.ranges.some((r) => v >= r.start && v <= r.end)
-                      ) {
-                        setDate(v);
-                      } else {
-                        toast.error(
-                          "NASA has no imagery for that date. Choose a published date.",
-                        );
-                      }
-                    }}
-                  />
-                </label>
-                <div className="national-opacity">
-                  <span>Layer opacity</span>
-                  <Slider
-                    aria-label="Vegetation layer opacity"
-                    min={0.1}
-                    max={1}
-                    step={0.05}
-                    value={[opacity]}
-                    onValueChange={(v) =>
-                      setOpacity(Array.isArray(v) ? v[0] : v)
-                    }
-                  />
-                </div>
-              </section>
-              {imageryError && (
-                <div className="storage-error" role="alert">
-                  <span>{imageryError}</span>
-                  <button onClick={loadImagery}>Try again</button>
-                </div>
-              )}
-              <section className="explore-grid">
-                <div className="map-column">
-                  <div className="map-toolbar">
-                    <label className="search-box">
-                      <Search size={18} />
-                      <input
-                        aria-label="Search neighborhoods"
-                        placeholder="Search a neighborhood or planting site"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                      />
-                    </label>
-                    <Select value={priority} onValueChange={setPriority}>
-                      <SelectTrigger className="filter-select">
-                        <SlidersHorizontal size={16} />
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {["All priorities", "High", "Medium", "Low"].map(
-                          (p) => (
-                            <SelectItem value={p} key={p}>
-                              {p}
-                            </SelectItem>
-                          ),
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <MapView
-                    sites={filtered}
-                    selected={selected}
-                    onSelect={selectSite}
-                    onLocation={(lat, lng) => {
-                      setLocation([lat, lng]);
-                      setFocusSite(false);
-                      setStateCode("USA");
-                      setTarget({ lat, lng, zoom: 13, label: "Your location" });
-                    }}
-                    target={target}
-                    ndvi={ndvi}
-                    date={date}
-                    opacity={opacity}
-                    focusSite={focusSite}
-                    onMove={(lat, lng) => setMapCenter([lat, lng])}
-                  />
-                  <div className="area-list-head">
-                    <h2>
-                      {location
-                        ? "Sites within 100 km"
-                        : "Recorded planting areas"}{" "}
-                      <span>{filtered.length}</span>
-                    </h2>
+              <div className="panel status-panel">
+                <h2>Registration status</h2>
+                <p>Current rows grouped by status</p>
+                {["Completed", "Confirmed", "Pending", "Cancelled"].map((s) => (
+                  <div className="status-row" key={s}>
                     <span>
-                      {location
-                        ? "From your selected view"
-                        : "Example & community sites"}{" "}
-                      · assessment required
+                      <i className={s.toLowerCase()} />
+                      {s}
                     </span>
+                    <strong>{statusCounts[s] ?? 0}</strong>
                   </div>
-                  <div className="area-list">
-                    {filtered.map((s) => (
-                      <button
-                        key={s.id}
-                        className={`area-card ${selected.id === s.id ? "selected" : ""}`}
-                        onClick={() => selectSite(s)}
-                      >
-                        <span
-                          className={`area-pin ${s.priority.toLowerCase()}`}
-                        >
-                          <MapPin size={21} />
-                        </span>
-                        <div>
-                          <h3>{s.name}</h3>
-                          <p>{s.area}</p>
-                        </div>
-                        <span
-                          className={`priority-badge ${s.priority.toLowerCase()}`}
-                        >
-                          {s.priority} priority
-                        </span>
-                        <ChevronRight size={17} />
-                      </button>
-                    ))}
-                    {!filtered.length && (
-                      <p className="empty">
-                        No recorded sites match this view. You can suggest a
-                        planting site; satellite vegetation is available
-                        nationwide.
-                      </p>
+                ))}
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setTable("Registration");
+                    setView("admin");
+                  }}
+                >
+                  Open registrations
+                </Button>
+              </div>
+            </section>
+          </>
+        ) : view === "opportunities" ? (
+          <section className="panel opportunity-panel">
+            <div className="panel-head">
+              <div>
+                <h2>All opportunities</h2>
+                <p>
+                  {data.tables.VolunteerOpportunity.length} database records
+                </p>
+              </div>
+            </div>
+            <div className="opportunity-cards">
+              {data.tables.VolunteerOpportunity.map((event) => (
+                <article key={event.OpportunityID}>
+                  <div className="event-date">
+                    {new Date(event.EventDate + "T12:00:00").toLocaleDateString(
+                      "en-US",
+                      { month: "short", day: "numeric", year: "numeric" },
                     )}
                   </div>
-                </div>
-                {!focusSite ? (
-                  <SatellitePanel
-                    point={mapCenter}
-                    date={date}
-                    enabled={ndvi}
-                    onSuggest={suggestAtCenter}
+                  <h3>{event.Title}</h3>
+                  <p>
+                    <Building2 /> {event.Organization}
+                  </p>
+                  <p>
+                    <CalendarDays /> {event.Location}
+                  </p>
+                  <span>{event.SignUps} registrations</span>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className="admin-intro">
+              <div>
+                <Database />
+                <span>
+                  <strong>MySQL schema</strong>
+                  <small>
+                    The interface follows volunteer_db.sql without changing that
+                    file.
+                  </small>
+                </span>
+              </div>
+              <div>
+                <ShieldCheck />
+                <span>
+                  <strong>Permanent deletes</strong>
+                  <small>Foreign-key cascade rules remain in effect.</small>
+                </span>
+              </div>
+            </section>
+            <section className="panel admin-panel">
+              <Tabs
+                value={table}
+                onValueChange={(v) => {
+                  setTable(v as TableName);
+                  setQuery("");
+                }}
+              >
+                <TabsList>
+                  {(Object.keys(tableInfo) as TableName[]).map((name) => {
+                    const Icon = tableInfo[name].icon;
+                    return (
+                      <TabsTrigger key={name} value={name}>
+                        <Icon />
+                        {tableInfo[name].label}
+                        <span>{data.tables[name].length}</span>
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+              </Tabs>
+              <div className="admin-toolbar">
+                <label>
+                  <Search />
+                  <Input
+                    aria-label={`Search ${tableInfo[table].label}`}
+                    placeholder={`Search ${tableInfo[table].label.toLowerCase()}…`}
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
                   />
-                ) : (
-                  <aside className="site-panel">
-                    <button
-                      className="outline-btn"
-                      style={{ marginBottom: 20 }}
-                      onClick={() => chooseState("USA")}
-                    >
-                      Return to nationwide vegetation
-                    </button>
-                    <div className="panel-top">
-                      <span className="eyebrow">PLANTING SITE INSIGHTS</span>
-                      <span
-                        className={`priority-badge ${selected.priority.toLowerCase()}`}
-                      >
-                        {selected.priority} priority
-                      </span>
-                    </div>
-                    <h2>{selected.name}</h2>
-                    <p className="site-address">
-                      <MapPin size={14} />
-                      {selected.area}
-                    </p>
-                    <div className="canopy-box">
-                      <div>
-                        <span>
-                          {selected.example
-                            ? "Illustrative canopy coverage"
-                            : "Canopy coverage"}
-                        </span>
-                        <strong>
-                          {selected.example ? selected.canopy : "—"}
-                          <small>{selected.example ? "%" : ""}</small>
-                        </strong>
-                      </div>
-                      <div className="canopy-track">
-                        <i style={{ width: `${selected.canopy}%` }} />
-                      </div>
-                      <p>
-                        {selected.example
-                          ? "Example conditions, pending a local site assessment."
-                          : "Community-reported conditions; canopy has not been measured."}
-                      </p>
-                    </div>
-                    <h3 className="section-label">
-                      Know the growing conditions
-                    </h3>
-                    <div className="condition-grid">
-                      <div>
-                        <Sprout />
-                        <span>Soil type</span>
-                        <strong>{selected.soil}</strong>
-                      </div>
-                      <div>
-                        <Sun />
-                        <span>Sunlight</span>
-                        <strong>{selected.sun}</strong>
-                      </div>
-                      <div>
-                        <Droplets />
-                        <span>Water</span>
-                        <strong>{selected.water}</strong>
-                      </div>
-                      <div>
-                        <TreePine />
-                        <span>Canopy space</span>
-                        <strong>{selected.space} ft</strong>
-                      </div>
-                    </div>
-                    <div className="zone-line">
-                      <span>USDA hardiness zone</span>
-                      <strong>
-                        {selected.zone}{" "}
-                        <small>
-                          ({selected.example ? "example" : "reported"})
-                        </small>
-                      </strong>
-                    </div>
-                    <div className="recommend-head">
-                      <h3>Right trees for this place</h3>
-                      <Leaf size={17} />
-                    </div>
-                    <p className="recommend-desc">
-                      Matched to sunlight, soil, space, water and zone.
-                    </p>
-                    {[...trees]
-                      .sort(
-                        (a, b) =>
-                          matchTree(b, selected).score -
-                          matchTree(a, selected).score,
-                      )
-                      .slice(0, 3)
-                      .map((t) => (
-                        <button
-                          className="tree-match"
-                          key={t.id}
-                          onClick={() => setView("Tree catalog")}
-                        >
-                          <span className="tree-icon">
-                            <TreePine />
-                          </span>
-                          <div>
-                            <strong>{t.name}</strong>
-                            <em>{t.latin}</em>
-                          </div>
-                          <span>
-                            {matchTree(t, selected).score}%<small>match</small>
-                          </span>
-                        </button>
+                </label>
+                <Button onClick={() => setInsertOpen(true)}>
+                  <Plus />
+                  Add {tableInfo[table].singular}
+                </Button>
+              </div>
+              <div className="data-table-wrap">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {tableInfo[table].columns.map((c) => (
+                        <TableHead key={c.key}>{c.label}</TableHead>
                       ))}
-                    <button
-                      className="outline-btn"
-                      onClick={() => setView("Tree catalog")}
-                    >
-                      Explore the tree catalog <ArrowUpRight size={15} />
-                    </button>
-                    <div className="site-note">
-                      <ShieldCheck size={17} />
-                      <p>
-                        Recommendations guide exploration. An arborist should
-                        verify conditions before planting.
-                      </p>
-                    </div>
-                  </aside>
-                )}
-              </section>
-            </>
-          ) : (
-            <WorkspaceViews
-              view={view}
-              data={data}
-              site={selected}
-              user={user}
-              onAction={action}
-              onForm={(kind, initial = {}) => setForm({ kind, initial })}
-            />
-          )}
-          <ContributionForm
-            kind={form?.kind ?? null}
-            initial={form?.initial}
-            user={user}
-            onClose={() => setForm(null)}
-            onSave={action}
-          />
-        </main>
-        <footer>
-          <span>
-            <TreePine size={14} /> Better places. One tree at a time.
-          </span>
-          <span>
-            Map © OpenStreetMap contributors{" "}
-            <span className="footer-divider">|</span> Treefinder community
-          </span>
-        </footer>
+                      <TableHead className="action-col">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filtered.map((row) => (
+                      <TableRow key={row[tableInfo[table].id]}>
+                        {tableInfo[table].columns.map((c) => (
+                          <TableCell key={c.key}>
+                            {c.key === "Status" ? (
+                              <Badge variant="outline">{row[c.key]}</Badge>
+                            ) : (
+                              String(row[c.key] ?? "—")
+                            )}
+                          </TableCell>
+                        ))}
+                        <TableCell className="action-col">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="delete-button"
+                            aria-label={`Delete ${tableInfo[table].singular}`}
+                            onClick={() =>
+                              setDeleteTarget({
+                                table,
+                                id: Number(row[tableInfo[table].id]),
+                                name:
+                                  row.Name ||
+                                  row.Title ||
+                                  row.Member ||
+                                  row.Volunteer ||
+                                  `record ${row[tableInfo[table].id]}`,
+                              })
+                            }
+                          >
+                            <Trash2 />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {!filtered.length && (
+                      <TableRow>
+                        <TableCell
+                          colSpan={tableInfo[table].columns.length + 1}
+                          className="empty-cell"
+                        >
+                          No matching records.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+              <footer className="table-footer">
+                Showing {filtered.length} of {rows.length} rows in{" "}
+                <code>{table}</code>
+              </footer>
+            </section>
+          </>
+        )}
+      </main>
+      <InsertDialog
+        table={table}
+        data={data}
+        open={insertOpen}
+        saving={saving}
+        onOpenChange={setInsertOpen}
+        onSave={insertRecord}
+      />
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Permanently delete this record?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{deleteTarget?.name}</strong> will be removed from{" "}
+              <code>{deleteTarget?.table}</code>. This cannot be undone. Related
+              records may also be deleted according to the foreign-key cascade
+              rules.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="confirm-delete"
+              disabled={saving}
+              onClick={(e) => {
+                e.preventDefault();
+                deleteRecord();
+              }}
+            >
+              {saving ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
+              Delete permanently
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function Summary({
+  icon: Icon,
+  label,
+  value,
+  detail,
+}: {
+  icon: any;
+  label: string;
+  value: number;
+  detail: string;
+}) {
+  return (
+    <article className="summary-card">
+      <span>
+        <Icon />
+      </span>
+      <div>
+        <p>{label}</p>
+        <strong>{value}</strong>
+        <small>{detail}</small>
       </div>
-    </SidebarProvider>
+    </article>
+  );
+}
+
+function InsertDialog({
+  table,
+  data,
+  open,
+  saving,
+  onOpenChange,
+  onSave,
+}: {
+  table: TableName;
+  data: Snapshot;
+  open: boolean;
+  saving: boolean;
+  onOpenChange: (v: boolean) => void;
+  onSave: (v: Record<string, any>) => void;
+}) {
+  const [form, setForm] = useState<Record<string, any>>({});
+  useEffect(() => {
+    if (open)
+      setForm(
+        table === "OrganizationMember"
+          ? { JoinDate: today(), OrgRole: "Member" }
+          : table === "Registration"
+            ? { RegistrationDate: today(), Status: "Pending", HoursLogged: 0 }
+            : {},
+      );
+  }, [open, table]);
+  const set = (key: string, value: any) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    onSave(form);
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="insert-dialog">
+        <DialogHeader>
+          <DialogTitle>Insert {tableInfo[table].singular}</DialogTitle>
+          <DialogDescription>
+            This creates a new row in the <code>{table}</code> table.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="insert-form">
+          {table === "Organization" && (
+            <>
+              <Field label="Organization name">
+                <Input
+                  required
+                  maxLength={100}
+                  value={form.Name ?? ""}
+                  onChange={(e) => set("Name", e.target.value)}
+                />
+              </Field>
+              <Field label="Type">
+                <SelectInput
+                  required
+                  value={form.Type ?? ""}
+                  onChange={(e) => set("Type", e.target.value)}
+                  options={[
+                    "Nonprofit",
+                    "Government",
+                    "School",
+                    "Community Group",
+                    "Business",
+                  ]}
+                />
+              </Field>
+              <Field label="Contact email">
+                <Input
+                  required
+                  type="email"
+                  maxLength={100}
+                  value={form.ContactEmail ?? ""}
+                  onChange={(e) => set("ContactEmail", e.target.value)}
+                />
+              </Field>
+            </>
+          )}
+          {table === "Users" && (
+            <>
+              <div className="form-pair">
+                <Field label="First name">
+                  <Input
+                    required
+                    maxLength={50}
+                    value={form.FName ?? ""}
+                    onChange={(e) => set("FName", e.target.value)}
+                  />
+                </Field>
+                <Field label="Last name">
+                  <Input
+                    required
+                    maxLength={50}
+                    value={form.LName ?? ""}
+                    onChange={(e) => set("LName", e.target.value)}
+                  />
+                </Field>
+              </div>
+              <Field label="Email">
+                <Input
+                  required
+                  type="email"
+                  maxLength={100}
+                  value={form.Email ?? ""}
+                  onChange={(e) => set("Email", e.target.value)}
+                />
+              </Field>
+              <p className="form-note">
+                New users receive the base User role automatically.
+              </p>
+            </>
+          )}
+          {table === "VolunteerOpportunity" && (
+            <>
+              <Field label="Organization">
+                <LookupSelect
+                  value={form.OrgID ?? ""}
+                  onChange={(v) => set("OrgID", v)}
+                  options={data.lookups.organizations}
+                />
+              </Field>
+              <Field label="Title">
+                <Input
+                  required
+                  maxLength={150}
+                  value={form.Title ?? ""}
+                  onChange={(e) => set("Title", e.target.value)}
+                />
+              </Field>
+              <Field label="Event date">
+                <Input
+                  required
+                  type="date"
+                  value={form.EventDate ?? ""}
+                  onChange={(e) => set("EventDate", e.target.value)}
+                />
+              </Field>
+              <Field label="Location">
+                <Input
+                  required
+                  maxLength={150}
+                  value={form.Location ?? ""}
+                  onChange={(e) => set("Location", e.target.value)}
+                />
+              </Field>
+            </>
+          )}
+          {table === "OrganizationMember" && (
+            <>
+              <Field label="Organization">
+                <LookupSelect
+                  value={form.OrgID ?? ""}
+                  onChange={(v) => set("OrgID", v)}
+                  options={data.lookups.organizations}
+                />
+              </Field>
+              <Field label="User">
+                <LookupSelect
+                  value={form.UserID ?? ""}
+                  onChange={(v) => set("UserID", v)}
+                  options={data.lookups.users}
+                />
+              </Field>
+              <div className="form-pair">
+                <Field label="Join date">
+                  <Input
+                    required
+                    type="date"
+                    value={form.JoinDate ?? ""}
+                    onChange={(e) => set("JoinDate", e.target.value)}
+                  />
+                </Field>
+                <Field label="Organization role">
+                  <SelectInput
+                    required
+                    value={form.OrgRole ?? "Member"}
+                    onChange={(e) => set("OrgRole", e.target.value)}
+                    options={["Member", "Coordinator", "Officer", "Director"]}
+                  />
+                </Field>
+              </div>
+            </>
+          )}
+          {table === "Registration" && (
+            <>
+              <Field label="User">
+                <LookupSelect
+                  value={form.UserID ?? ""}
+                  onChange={(v) => set("UserID", v)}
+                  options={data.lookups.users}
+                />
+              </Field>
+              <Field label="Opportunity">
+                <LookupSelect
+                  value={form.OpportunityID ?? ""}
+                  onChange={(v) => set("OpportunityID", v)}
+                  options={data.lookups.opportunities}
+                />
+              </Field>
+              <div className="form-pair">
+                <Field label="Registration date">
+                  <Input
+                    required
+                    type="date"
+                    value={form.RegistrationDate ?? ""}
+                    onChange={(e) => set("RegistrationDate", e.target.value)}
+                  />
+                </Field>
+                <Field label="Status">
+                  <SelectInput
+                    required
+                    value={form.Status ?? "Pending"}
+                    onChange={(e) => set("Status", e.target.value)}
+                    options={["Pending", "Confirmed", "Cancelled", "Completed"]}
+                  />
+                </Field>
+              </div>
+              <Field label="Hours logged">
+                <Input
+                  required
+                  type="number"
+                  min={0}
+                  max={24}
+                  step={0.5}
+                  value={form.HoursLogged ?? 0}
+                  onChange={(e) => set("HoursLogged", Number(e.target.value))}
+                />
+              </Field>
+            </>
+          )}
+          <div className="dialog-actions">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? <LoaderCircle className="animate-spin" /> : <Plus />}
+              Insert row
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+function SelectInput({
+  value,
+  onChange,
+  options,
+  required,
+}: {
+  value: any;
+  onChange: (e: any) => void;
+  options: string[];
+  required?: boolean;
+}) {
+  return (
+    <select required={required} value={value} onChange={onChange}>
+      <option value="" disabled>
+        Select…
+      </option>
+      {options.map((x) => (
+        <option key={x} value={x}>
+          {x}
+        </option>
+      ))}
+    </select>
+  );
+}
+function LookupSelect({
+  value,
+  onChange,
+  options,
+}: {
+  value: any;
+  onChange: (v: string) => void;
+  options: { id: number; label: string }[];
+}) {
+  return (
+    <select required value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="" disabled>
+        Select…
+      </option>
+      {options.map((x) => (
+        <option key={x.id} value={x.id}>
+          {x.label}
+        </option>
+      ))}
+    </select>
   );
 }

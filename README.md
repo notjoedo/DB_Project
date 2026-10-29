@@ -1,54 +1,57 @@
-# Treefinder
+# Treefinder — Phase 2 Volunteer Database
 
-A responsive tree information and stewardship app built with React, Vinext, Leaflet, and Cloudflare D1.
+Treefinder is a simple volunteer-management web application for the Phase 2 database requirements. The interface reads from the database, displays ready sample data, inserts records, and permanently deletes records from the five major tables.
 
-## Features
+## MySQL source of truth
 
-- Nationwide OpenStreetMap explorer with navigation for all 50 states and DC, geolocation, site search, priority filters, and local planting-site insights.
-- Real NASA GIBS MODIS Terra NDVI overlay across the USA, including Alaska and Hawaii; published imagery dates, opacity control, official color legend, and explicit 250 m resolution.
-- Public AWS Sentinel-2 Collection 1 L2A scene discovery near the map center, with acquisition dates, tile-wide cloud percentages, and source STAC records.
-- Optional historical NYC Parks 2015 street-tree census overlay from NYC Open Data.
-- Native species catalog with sunlight, size, and hardiness filters; botanical sources; wildlife information; transparent five-factor site matching; one favorite-tree vote per account.
-- Event registration and cancellation, volunteer profiles, participation history, and administrator-reviewed hours.
-- Community questions and replies with server-assigned verified arborist badges.
-- Planting site, species, organization, and event submissions; arborist care guides; approval and moderation queues.
-- Server-side role enforcement and ChatGPT sign-in. Initial administrator is allowlisted through the `TREEFINDER_ADMIN_EMAIL` runtime variable, configured to the verified Site owner at deployment.
+The supplied MySQL 8 script is [`sqlproject/volunteer_db.sql`](sqlproject/volunteer_db.sql). It is preserved unchanged. Run it in MySQL Workbench or from the command line:
 
-## Run locally
+```sh
+mysql -u root -p < sqlproject/volunteer_db.sql
+```
+
+The script creates `volunteer_db`, its seven normalized tables, foreign keys, validation checks, and sample data. The major tables already contain at least 20 tuples:
+
+| Major table          | Initial rows |
+| -------------------- | -----------: |
+| Organization         |           20 |
+| Users                |           30 |
+| VolunteerOpportunity |           25 |
+| OrganizationMember   |           30 |
+| Registration         |           40 |
+
+`Role` is a four-row lookup table. `UserRole` is a supporting many-to-many relationship table with 43 initial rows.
+
+## Phase 2 interface
+
+The Admin database page provides:
+
+- Searchable views of all five major tables.
+- Table row counts read from the database.
+- Validated insert forms for each major table.
+- Permanent delete actions with a confirmation dialog.
+- Database-enforced uniqueness, checks, and foreign-key cascade behavior.
+- Human-readable joined data, such as organization names, member names, opportunity titles, and registration counts.
+
+The Overview and Opportunities pages also read joined data from the database. The previous NASA, Sentinel-2, NYC Open Data, and live map requests have been removed.
+
+## Hosted and local database note
+
+The hosted Sites runtime cannot open a raw MySQL TCP connection. Its deployment uses Cloudflare D1 with a compatibility migration that mirrors the table names, columns, relationships, constraints, and sample rows in the unchanged MySQL script. The GUI sends the same logical insert and delete operations to that database.
+
+For the course submission, `volunteer_db.sql` remains the MySQL deliverable and can be run directly in MySQL Workbench. The compatibility migration is [`drizzle/0001_phase2_volunteer.sql`](drizzle/0001_phase2_volunteer.sql).
+
+## Run the web app locally
 
 ```sh
 npm install
 npm run dev
 ```
 
-Copy `.env.example` to `.env` for the local mock admin. Local sign-in at `/signin-with-chatgpt?return_to=/` uses the starter's development identity only. Production uses platform authentication, with no local mock sign-in.
+The local Sites development identity uses the administrator email in `.env`. Production administrator access is restricted to the configured `TREEFINDER_ADMIN_EMAIL`.
 
-Generate migrations with `npm run db:generate`, build with `npm run build`, then apply each new migration once:
+Build with:
 
 ```sh
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_brainy_karma.sql
+npm run build
 ```
-
-Hosted D1 migrations are applied by Sites during deployment. Database writes use prepared statements and are attributed to authenticated identities. Browser storage is not used for authoritative records.
-
-## Nationwide satellite coverage
-
-`/api/vegetation` resolves NASA GIBS's published imagery dates from its official WMTS capabilities. Leaflet loads cached public map tiles directly from NASA's `MODIS_Terra_NDVI_8Day` layer. The source uses 250 m MODIS pixels and rolling 8-day observations. At close zoom, tiles are enlarged; no additional spatial detail is created. Missing dates are rejected and missing tiles are not interpreted as low vegetation. Coverage is national; individual pixels can be missing due to clouds, snow, or observation quality. Alaska and Hawaii have separate navigation entries; the layer is global and also supports the Aleutians across the date line.
-
-`/api/satellite` searches Earth Search's `sentinel-2-c1-l2a` collection for the latest eight scenes intersecting a small map-center bounding box over the 60 days ending on the chosen date. It returns public red, NIR, and scene-classification asset URLs, acquisition dates, and scene-wide cloud cover. Scene discovery is not an NDVI computation, and the map's displayed NDVI remains NASA's 250 m product.
-
-A custom nationwide 10 m Sentinel-2 preprocessing service is not deployed. It would run separately from the web request runtime: partition the USA into land-intersecting work units, read cloud-optimized GeoTIFF windows, apply each asset's reflectance scale/offset, mask clouds/shadows/snow/no-data with SCL, form seasonal multi-scene composites, and store NDVI plus valid-observation coverage as COGs and cached tiles. Use restartable jobs and a bounded concurrency budget. Raw imagery is openly accessible, while production compute, output storage, and delivery need an explicit infrastructure budget. Low NDVI alone cannot establish planting suitability; canopy, heat, plantable land, native range, utilities, and permissions are separate requirements.
-
-Sources: [NASA GIBS](https://earthdata.nasa.gov/gibs), [public Sentinel-2 COGs](https://registry.opendata.aws/sentinel-2-l2a-cogs/), [Earth Search](https://github.com/Element84/earth-search).
-
-## Data and geospatial limits
-
-The initial six planting areas, canopy percentages, growing conditions, priorities, and three events are clearly labeled examples. They are not a current canopy assessment, confirmed planting sites, or real scheduled volunteer activities. Community-approved sites use reported conditions and do not display measured canopy. Hardiness values should be checked locally before planting.
-
-The NYC census overlay contains historical 2015 survey records, fetched near the selected site with a 500-record cap. These records are not a real-time tree inventory. Matching scores reflect five equally weighted compatibility checks (zone, sunlight, soil texture, canopy width, moisture), not a scientific survival prediction. Local drainage, utility clearance, soil chemistry, and permits need professional assessment.
-
-Botanical entries cite NC State Extension. Organization links point to the organizations' own sites and do not imply partnership. Image attribution is shown in the volunteering view.
-
-No paid API keys are required for this version. Before large-scale production traffic, configure a commercial or self-hosted map tile provider to meet OpenStreetMap usage requirements. A city canopy raster, current inventory, heat-vulnerability layer, detailed soil survey, and municipal planting eligibility would support authoritative planting prioritization.
-
-WebMCP exposes `explore_planting_site` where the browser supports it, using the same visible site selection and compatibility calculation.
