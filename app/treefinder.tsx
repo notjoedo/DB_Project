@@ -1,1007 +1,275 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
-import { Toaster } from "@/components/ui/sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
-import {
-  Building2,
-  CalendarDays,
-  Database,
-  LayoutDashboard,
-  Leaf,
-  LoaderCircle,
-  LogOut,
-  Plus,
-  Search,
-  ShieldCheck,
-  Trash2,
-  Users,
-  UserRoundCheck,
-} from "lucide-react";
 
-type TableName =
-  | "Organization"
-  | "Users"
-  | "VolunteerOpportunity"
-  | "OrganizationMember"
-  | "Registration";
+type TableName = "Organization" | "Users" | "VolunteerOpportunity" | "OrganizationMember" | "Registration";
+type Row = Record<string, string | number | null>;
 type Snapshot = {
   counts: { TableName: string; RowCount: number }[];
-  tables: Record<TableName, Record<string, any>[]>;
+  tables: Record<TableName, Row[]>;
   lookups: {
     organizations: { id: number; label: string }[];
     users: { id: number; label: string }[];
     opportunities: { id: number; label: string }[];
-    roles: { RoleID: number; RoleName: string }[];
   };
-  admin?: { email: string; fullName?: string | null };
 };
 
-const tableInfo: Record<
-  TableName,
-  {
-    label: string;
-    singular: string;
-    id: string;
-    icon: any;
-    columns: { key: string; label: string }[];
-  }
-> = {
+const tables: Record<TableName, { label: string; singular: string; id: string; columns: { key: string; label: string }[] }> = {
   Organization: {
-    label: "Organizations",
-    singular: "organization",
-    id: "OrgID",
-    icon: Building2,
-    columns: [
-      { key: "OrgID", label: "ID" },
-      { key: "Name", label: "Name" },
-      { key: "Type", label: "Type" },
-      { key: "ContactEmail", label: "Contact email" },
-    ],
+    label: "Organizations", singular: "organization", id: "OrgID",
+    columns: [{ key: "OrgID", label: "ID" }, { key: "Name", label: "Name" }, { key: "Type", label: "Type" }, { key: "ContactEmail", label: "Contact email" }],
   },
   Users: {
-    label: "Users",
-    singular: "user",
-    id: "UserID",
-    icon: Users,
-    columns: [
-      { key: "UserID", label: "ID" },
-      { key: "FName", label: "First name" },
-      { key: "LName", label: "Last name" },
-      { key: "Email", label: "Email" },
-      { key: "Roles", label: "Roles" },
-    ],
+    label: "Users", singular: "user", id: "UserID",
+    columns: [{ key: "UserID", label: "ID" }, { key: "FName", label: "First name" }, { key: "LName", label: "Last name" }, { key: "Email", label: "Email" }, { key: "Roles", label: "Roles" }],
   },
   VolunteerOpportunity: {
-    label: "Opportunities",
-    singular: "opportunity",
-    id: "OpportunityID",
-    icon: CalendarDays,
-    columns: [
-      { key: "OpportunityID", label: "ID" },
-      { key: "Organization", label: "Organization" },
-      { key: "Title", label: "Title" },
-      { key: "EventDate", label: "Event date" },
-      { key: "Location", label: "Location" },
-      { key: "SignUps", label: "Sign-ups" },
-    ],
+    label: "Opportunities", singular: "opportunity", id: "OpportunityID",
+    columns: [{ key: "OpportunityID", label: "ID" }, { key: "Organization", label: "Organization" }, { key: "Title", label: "Title" }, { key: "EventDate", label: "Event date" }, { key: "Location", label: "Location" }, { key: "SignUps", label: "Sign-ups" }],
   },
   OrganizationMember: {
-    label: "Members",
-    singular: "organization member",
-    id: "MembershipID",
-    icon: UserRoundCheck,
-    columns: [
-      { key: "MembershipID", label: "ID" },
-      { key: "Organization", label: "Organization" },
-      { key: "Member", label: "Member" },
-      { key: "JoinDate", label: "Join date" },
-      { key: "OrgRole", label: "Role" },
-    ],
+    label: "Members", singular: "member", id: "MembershipID",
+    columns: [{ key: "MembershipID", label: "ID" }, { key: "Organization", label: "Organization" }, { key: "Member", label: "Member" }, { key: "JoinDate", label: "Join date" }, { key: "OrgRole", label: "Role" }],
   },
   Registration: {
-    label: "Registrations",
-    singular: "registration",
-    id: "RegistrationID",
-    icon: ShieldCheck,
-    columns: [
-      { key: "RegistrationID", label: "ID" },
-      { key: "Volunteer", label: "Volunteer" },
-      { key: "Opportunity", label: "Opportunity" },
-      { key: "RegistrationDate", label: "Registered" },
-      { key: "Status", label: "Status" },
-      { key: "HoursLogged", label: "Hours" },
-    ],
+    label: "Registrations", singular: "registration", id: "RegistrationID",
+    columns: [{ key: "RegistrationID", label: "ID" }, { key: "Volunteer", label: "Volunteer" }, { key: "Opportunity", label: "Opportunity" }, { key: "RegistrationDate", label: "Registered" }, { key: "Status", label: "Status" }, { key: "HoursLogged", label: "Hours" }],
   },
 };
 
-const emptyData = (): Snapshot => ({
+const emptySnapshot: Snapshot = {
   counts: [],
-  tables: {
-    Organization: [],
-    Users: [],
-    VolunteerOpportunity: [],
-    OrganizationMember: [],
-    Registration: [],
-  },
-  lookups: { organizations: [], users: [], opportunities: [], roles: [] },
-});
+  tables: { Organization: [], Users: [], VolunteerOpportunity: [], OrganizationMember: [], Registration: [] },
+  lookups: { organizations: [], users: [], opportunities: [] },
+};
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function Treefinder({
-  user,
-}: {
-  user: { id: string; name: string; email: string } | null;
-}) {
-  const [view, setView] = useState<"overview" | "opportunities" | "admin">(
-    "overview",
-  );
-  const [data, setData] = useState<Snapshot>(emptyData);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+export default function Treefinder({ user }: { user: { id: string; name: string; email: string } | null }) {
+  const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [table, setTable] = useState<TableName>("Organization");
   const [query, setQuery] = useState("");
-  const [insertOpen, setInsertOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{
-    table: TableName;
-    id: number;
-    name: string;
-  } | null>(null);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const r = await fetch("/api/admin-data");
-      const j: any = await r.json();
-      if (!r.ok) throw new Error(j.error);
-      setData(j);
-    } catch (e: any) {
-      setError(e.message);
+      const response = await fetch("/api/admin-data");
+      const result = (await response.json()) as Snapshot & { error?: string };
+      if (!response.ok) throw new Error(result.error);
+      setSnapshot(result);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Database unavailable.");
     } finally {
       setLoading(false);
     }
   }, []);
+
   useEffect(() => {
-    if (user) load();
-    else setLoading(false);
+    if (!user) return;
+    const timer = window.setTimeout(load, 0);
+    return () => window.clearTimeout(timer);
   }, [user, load]);
 
-  function replaceSnapshot(j: any) {
-    setData({ ...j.snapshot, admin: data.admin });
-  }
-  async function insertRecord(form: Record<string, any>) {
+  const rows = snapshot.tables[table];
+  const filteredRows = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    return search ? rows.filter((row) => Object.values(row).join(" ").toLowerCase().includes(search)) : rows;
+  }, [query, rows]);
+
+  async function insert(data: Record<string, string | number>) {
     setSaving(true);
+    setMessage("");
     try {
-      const r = await fetch("/api/admin-data", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ table, data: form }),
+      const response = await fetch("/api/admin-data", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ table, data }),
       });
-      const j: any = await r.json();
-      if (!r.ok) throw new Error(j.error);
-      replaceSnapshot(j);
-      setInsertOpen(false);
-      toast.success(
-        `${tableInfo[table].singular[0].toUpperCase() + tableInfo[table].singular.slice(1)} inserted into the database.`,
-      );
-    } catch (e: any) {
-      toast.error(e.message);
+      const result = (await response.json()) as { error?: string; snapshot: Snapshot };
+      if (!response.ok) throw new Error(result.error);
+      setSnapshot(result.snapshot);
+      setAdding(false);
+      setMessage("Record inserted successfully.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Insert failed.");
     } finally {
       setSaving(false);
     }
   }
-  async function deleteRecord() {
+
+  async function remove() {
     if (!deleteTarget) return;
     setSaving(true);
+    setMessage("");
     try {
-      const r = await fetch("/api/admin-data", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          table: deleteTarget.table,
-          id: deleteTarget.id,
-        }),
+      const response = await fetch("/api/admin-data", {
+        method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ table, id: deleteTarget.id }),
       });
-      const j: any = await r.json();
-      if (!r.ok) throw new Error(j.error);
-      replaceSnapshot(j);
+      const result = (await response.json()) as { error?: string; snapshot: Snapshot };
+      if (!response.ok) throw new Error(result.error);
+      setSnapshot(result.snapshot);
       setDeleteTarget(null);
-      toast.success("Record permanently deleted.");
-    } catch (e: any) {
-      toast.error(e.message);
+      setMessage("Record permanently deleted.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Delete failed.");
     } finally {
       setSaving(false);
     }
   }
 
-  if (!user)
-    return (
-      <div className="phase-login">
-        <div className="brand-mark">
-          <Leaf />
+  if (!user) return (
+    <main className="login">
+      <div className="logo">TF</div>
+      <h1>Treefinder Database</h1>
+      <p>Sign in as the administrator to manage volunteer data.</p>
+      <a className="primary-button" href="/signin-with-chatgpt?return_to=%2F">Sign in</a>
+    </main>
+  );
+
+  return (
+    <main className="page">
+      <header className="topbar">
+        <div><span className="logo small">TF</span><strong>Treefinder</strong></div>
+        <div className="account"><span>{user.name}</span><a href="/signout-with-chatgpt?return_to=%2F">Sign out</a></div>
+      </header>
+
+      <section className="content">
+        <div className="title-row">
+          <div><p className="eyebrow">PHASE 2</p><h1>Database Manager</h1><p>View, insert, and permanently delete records.</p></div>
+          <button className="primary-button" onClick={() => setAdding(true)}>+ Add {tables[table].singular}</button>
         </div>
-        <p className="kicker">TREEFINDER DATABASE</p>
-        <h1>Volunteer management, connected.</h1>
-        <p>
-          Sign in with the administrator account to view, insert, and delete
-          records.
-        </p>
-        <a className="login-button" href="/signin-with-chatgpt?return_to=%2F">
-          Sign in to continue
-        </a>
-      </div>
-    );
 
-  const counts = Object.fromEntries(
-    data.counts.map((x) => [x.TableName, Number(x.RowCount)]),
-  );
-  const rows = data.tables[table] ?? [];
-  const filtered = rows.filter((row) =>
-    Object.values(row).join(" ").toLowerCase().includes(query.toLowerCase()),
-  );
-  const upcoming = (data.tables.VolunteerOpportunity ?? [])
-    .filter((x) => x.EventDate >= today())
-    .slice(0, 6);
-  const totalHours = (data.tables.Registration ?? []).reduce(
-    (sum, row) => sum + Number(row.HoursLogged || 0),
-    0,
-  );
-  const statusCounts = (data.tables.Registration ?? []).reduce(
-    (acc: any, row) => ((acc[row.Status] = (acc[row.Status] || 0) + 1), acc),
-    {},
-  );
+        <div className="counts">
+          {(Object.keys(tables) as TableName[]).map((name) => (
+            <button key={name} className={table === name ? "active" : ""} onClick={() => { setTable(name); setQuery(""); setMessage(""); }}>
+              <strong>{snapshot.tables[name].length}</strong><span>{tables[name].label}</span>
+            </button>
+          ))}
+        </div>
 
-  return (
-    <>
-      <Toaster position="bottom-right" />
-      <div className="phase-shell">
-        <aside className="phase-sidebar">
-          <div className="phase-brand">
-            <span>
-              <Leaf />
-            </span>
-            <strong>treefinder.</strong>
+        {message && <p className="notice">{message}</p>}
+        {error && <div className="error"><span>{error}</span><button onClick={load}>Try again</button></div>}
+
+        <section className="database-card">
+          <div className="table-toolbar">
+            <div><h2>{tables[table].label}</h2><span>{rows.length} rows</span></div>
+            <input aria-label={`Search ${tables[table].label}`} placeholder="Search records..." value={query} onChange={(event) => setQuery(event.target.value)} />
           </div>
-          <nav aria-label="Main navigation">
-            <button
-              className={view === "overview" ? "active" : ""}
-              onClick={() => setView("overview")}
-            >
-              <LayoutDashboard />
-              Overview
-            </button>
-            <button
-              className={view === "opportunities" ? "active" : ""}
-              onClick={() => setView("opportunities")}
-            >
-              <CalendarDays />
-              Opportunities
-            </button>
-            <button
-              className={view === "admin" ? "active" : ""}
-              onClick={() => setView("admin")}
-            >
-              <Database />
-              Admin database
-            </button>
-          </nav>
-          <div className="database-state">
-            <span className={error ? "offline" : ""} />
-            <div>
-              <strong>
-                {error ? "Database unavailable" : "Database connected"}
-              </strong>
-              <small>volunteer_db · 7 tables</small>
-            </div>
-          </div>
-          <div className="phase-user">
-            <span>{user.name[0].toUpperCase()}</span>
-            <div>
-              <strong>{user.name}</strong>
-              <small>Administrator</small>
-            </div>
-            <a href="/signout-with-chatgpt?return_to=%2F" aria-label="Sign out">
-              <LogOut />
-            </a>
-          </div>
-        </aside>
-        <main className="phase-main">
-          <header>
-            <div>
-              <p className="kicker">PHASE 2 · DATABASE OPERATIONS</p>
-              <h1>
-                {view === "overview"
-                  ? "Volunteer program overview"
-                  : view === "opportunities"
-                    ? "Volunteer opportunities"
-                    : "Admin database"}
-              </h1>
-              <p>
-                {view === "admin"
-                  ? "View, insert, and permanently delete records from the major tables."
-                  : "Live information from the project database."}
-              </p>
-            </div>
-            {view === "admin" && (
-              <Button onClick={() => setInsertOpen(true)}>
-                <Plus />
-                Insert record
-              </Button>
-            )}
-          </header>
-          {error && (
-            <div className="phase-error">
-              <strong>Could not load the database.</strong>
-              <span>{error}</span>
-              <Button variant="outline" onClick={load}>
-                Try again
-              </Button>
+
+          {loading ? <p className="state">Loading database...</p> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr>{tables[table].columns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Action</th></tr></thead>
+                <tbody>
+                  {filteredRows.map((row) => {
+                    const id = Number(row[tables[table].id]);
+                    return <tr key={id}>
+                      {tables[table].columns.map((column) => <td key={column.key}>{String(row[column.key] ?? "—")}</td>)}
+                      <td><button className="delete-button" onClick={() => setDeleteTarget({
+                        id,
+                        name: String(row.Name ?? row.Title ?? row.Member ?? row.Volunteer ?? `record ${id}`),
+                      })}>Delete</button></td>
+                    </tr>;
+                  })}
+                  {!filteredRows.length && <tr><td colSpan={tables[table].columns.length + 1} className="state">No matching records.</td></tr>}
+                </tbody>
+              </table>
             </div>
           )}
-          {loading ? (
-            <div className="phase-loading">
-              <LoaderCircle className="animate-spin" />
-              Reading database…
-            </div>
-          ) : view === "overview" ? (
-            <>
-              <section className="summary-grid">
-                <Summary
-                  icon={Users}
-                  label="Users"
-                  value={counts.Users ?? 0}
-                  detail="sample volunteer profiles"
-                />
-                <Summary
-                  icon={Building2}
-                  label="Organizations"
-                  value={counts.Organization ?? 0}
-                  detail="community partners"
-                />
-                <Summary
-                  icon={CalendarDays}
-                  label="Opportunities"
-                  value={counts.VolunteerOpportunity ?? 0}
-                  detail="past and upcoming events"
-                />
-                <Summary
-                  icon={UserRoundCheck}
-                  label="Registrations"
-                  value={counts.Registration ?? 0}
-                  detail={`${totalHours.toFixed(1)} volunteer hours logged`}
-                />
-              </section>
-              <section className="overview-grid">
-                <div className="panel">
-                  <div className="panel-head">
-                    <div>
-                      <h2>Upcoming opportunities</h2>
-                      <p>Joined with organization and registration data</p>
-                    </div>
-                    <button onClick={() => setView("opportunities")}>
-                      View all
-                    </button>
-                  </div>
-                  <div className="event-list">
-                    {upcoming.map((event) => (
-                      <article key={event.OpportunityID}>
-                        <time>
-                          <strong>
-                            {new Date(
-                              event.EventDate + "T12:00:00",
-                            ).toLocaleDateString("en-US", { month: "short" })}
-                          </strong>
-                          <span>
-                            {new Date(event.EventDate + "T12:00:00").getDate()}
-                          </span>
-                        </time>
-                        <div>
-                          <h3>{event.Title}</h3>
-                          <p>
-                            {event.Organization} · {event.Location}
-                          </p>
-                        </div>
-                        <Badge variant="secondary">
-                          {event.SignUps} registered
-                        </Badge>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-                <div className="panel status-panel">
-                  <h2>Registration status</h2>
-                  <p>Current rows grouped by status</p>
-                  {["Completed", "Confirmed", "Pending", "Cancelled"].map(
-                    (s) => (
-                      <div className="status-row" key={s}>
-                        <span>
-                          <i className={s.toLowerCase()} />
-                          {s}
-                        </span>
-                        <strong>{statusCounts[s] ?? 0}</strong>
-                      </div>
-                    ),
-                  )}
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setTable("Registration");
-                      setView("admin");
-                    }}
-                  >
-                    Open registrations
-                  </Button>
-                </div>
-              </section>
-            </>
-          ) : view === "opportunities" ? (
-            <section className="panel opportunity-panel">
-              <div className="panel-head">
-                <div>
-                  <h2>All opportunities</h2>
-                  <p>
-                    {data.tables.VolunteerOpportunity.length} database records
-                  </p>
-                </div>
-              </div>
-              <div className="opportunity-cards">
-                {data.tables.VolunteerOpportunity.map((event) => (
-                  <article key={event.OpportunityID}>
-                    <div className="event-date">
-                      {new Date(
-                        event.EventDate + "T12:00:00",
-                      ).toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}
-                    </div>
-                    <h3>{event.Title}</h3>
-                    <p>
-                      <Building2 /> {event.Organization}
-                    </p>
-                    <p>
-                      <CalendarDays /> {event.Location}
-                    </p>
-                    <span>{event.SignUps} registrations</span>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ) : (
-            <>
-              <section className="admin-intro">
-                <div>
-                  <Database />
-                  <span>
-                    <strong>MySQL schema</strong>
-                    <small>
-                      The interface follows volunteer_db.sql without changing
-                      that file.
-                    </small>
-                  </span>
-                </div>
-                <div>
-                  <ShieldCheck />
-                  <span>
-                    <strong>Permanent deletes</strong>
-                    <small>Foreign-key cascade rules remain in effect.</small>
-                  </span>
-                </div>
-              </section>
-              <section className="panel admin-panel">
-                <Tabs
-                  value={table}
-                  onValueChange={(v) => {
-                    setTable(v as TableName);
-                    setQuery("");
-                  }}
-                >
-                  <TabsList>
-                    {(Object.keys(tableInfo) as TableName[]).map((name) => {
-                      const Icon = tableInfo[name].icon;
-                      return (
-                        <TabsTrigger key={name} value={name}>
-                          <Icon />
-                          {tableInfo[name].label}
-                          <span>{data.tables[name].length}</span>
-                        </TabsTrigger>
-                      );
-                    })}
-                  </TabsList>
-                </Tabs>
-                <div className="admin-toolbar">
-                  <label>
-                    <Search />
-                    <Input
-                      aria-label={`Search ${tableInfo[table].label}`}
-                      placeholder={`Search ${tableInfo[table].label.toLowerCase()}…`}
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                    />
-                  </label>
-                  <Button onClick={() => setInsertOpen(true)}>
-                    <Plus />
-                    Add {tableInfo[table].singular}
-                  </Button>
-                </div>
-                <div className="data-table-wrap">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        {tableInfo[table].columns.map((c) => (
-                          <TableHead key={c.key}>{c.label}</TableHead>
-                        ))}
-                        <TableHead className="action-col">Action</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filtered.map((row) => (
-                        <TableRow key={row[tableInfo[table].id]}>
-                          {tableInfo[table].columns.map((c) => (
-                            <TableCell key={c.key}>
-                              {c.key === "Status" ? (
-                                <Badge variant="outline">{row[c.key]}</Badge>
-                              ) : (
-                                String(row[c.key] ?? "—")
-                              )}
-                            </TableCell>
-                          ))}
-                          <TableCell className="action-col">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="delete-button"
-                              aria-label={`Delete ${tableInfo[table].singular}`}
-                              onClick={() =>
-                                setDeleteTarget({
-                                  table,
-                                  id: Number(row[tableInfo[table].id]),
-                                  name:
-                                    row.Name ||
-                                    row.Title ||
-                                    row.Member ||
-                                    row.Volunteer ||
-                                    `record ${row[tableInfo[table].id]}`,
-                                })
-                              }
-                            >
-                              <Trash2 />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      {!filtered.length && (
-                        <TableRow>
-                          <TableCell
-                            colSpan={tableInfo[table].columns.length + 1}
-                            className="empty-cell"
-                          >
-                            No matching records.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-                <footer className="table-footer">
-                  Showing {filtered.length} of {rows.length} rows in{" "}
-                  <code>{table}</code>
-                </footer>
-              </section>
-            </>
-          )}
-        </main>
-        <InsertDialog
-          table={table}
-          data={data}
-          open={insertOpen}
-          saving={saving}
-          onOpenChange={setInsertOpen}
-          onSave={insertRecord}
-        />
-        <AlertDialog
-          open={!!deleteTarget}
-          onOpenChange={(open) => !open && setDeleteTarget(null)}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                Permanently delete this record?
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                <strong>{deleteTarget?.name}</strong> will be removed from{" "}
-                <code>{deleteTarget?.table}</code>. This cannot be undone.
-                Related records may also be deleted according to the foreign-key
-                cascade rules.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                className="confirm-delete"
-                disabled={saving}
-                onClick={(e) => {
-                  e.preventDefault();
-                  deleteRecord();
-                }}
-              >
-                {saving ? (
-                  <LoaderCircle className="animate-spin" />
-                ) : (
-                  <Trash2 />
-                )}
-                Delete permanently
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
-    </>
+        </section>
+      </section>
+
+      {adding && <RecordForm table={table} snapshot={snapshot} saving={saving} onClose={() => setAdding(false)} onSave={insert} />}
+      {deleteTarget && (
+        <Modal title="Permanently delete this record?" onClose={() => setDeleteTarget(null)}>
+          <p><strong>{deleteTarget.name}</strong> will be deleted. Related rows may also be removed by the database rules. This cannot be undone.</p>
+          <div className="modal-actions">
+            <button onClick={() => setDeleteTarget(null)} disabled={saving}>Cancel</button>
+            <button className="danger-button" onClick={remove} disabled={saving}>{saving ? "Deleting..." : "Delete permanently"}</button>
+          </div>
+        </Modal>
+      )}
+    </main>
   );
 }
 
-function Summary({
-  icon: Icon,
-  label,
-  value,
-  detail,
-}: {
-  icon: any;
-  label: string;
-  value: number;
-  detail: string;
+function RecordForm({ table, snapshot, saving, onClose, onSave }: {
+  table: TableName; snapshot: Snapshot; saving: boolean; onClose: () => void; onSave: (data: Record<string, string | number>) => void;
 }) {
+  const defaults: Record<string, string | number> = table === "OrganizationMember"
+    ? { JoinDate: today(), OrgRole: "Member" }
+    : table === "Registration" ? { RegistrationDate: today(), Status: "Pending", HoursLogged: 0 } : {};
+  const [form, setForm] = useState<Record<string, string | number>>(defaults);
+  const set = (name: string, value: string | number) => setForm((current) => ({ ...current, [name]: value }));
+
   return (
-    <article className="summary-card">
-      <span>
-        <Icon />
-      </span>
-      <div>
-        <p>{label}</p>
-        <strong>{value}</strong>
-        <small>{detail}</small>
-      </div>
-    </article>
+    <Modal title={`Add ${tables[table].singular}`} onClose={onClose}>
+      <form className="record-form" onSubmit={(event) => { event.preventDefault(); onSave(form); }}>
+        {table === "Organization" && <>
+          <Field label="Organization name" name="Name" form={form} set={set} maxLength={100} />
+          <SelectField label="Type" name="Type" form={form} set={set} options={["Nonprofit", "Government", "School", "Community Group", "Business"]} />
+          <Field label="Contact email" name="ContactEmail" type="email" form={form} set={set} maxLength={100} />
+        </>}
+        {table === "Users" && <>
+          <Field label="First name" name="FName" form={form} set={set} maxLength={50} />
+          <Field label="Last name" name="LName" form={form} set={set} maxLength={50} />
+          <Field label="Email" name="Email" type="email" form={form} set={set} maxLength={100} />
+        </>}
+        {table === "VolunteerOpportunity" && <>
+          <LookupField label="Organization" name="OrgID" options={snapshot.lookups.organizations} form={form} set={set} />
+          <Field label="Title" name="Title" form={form} set={set} maxLength={150} />
+          <Field label="Event date" name="EventDate" type="date" form={form} set={set} />
+          <Field label="Location" name="Location" form={form} set={set} maxLength={150} />
+        </>}
+        {table === "OrganizationMember" && <>
+          <LookupField label="Organization" name="OrgID" options={snapshot.lookups.organizations} form={form} set={set} />
+          <LookupField label="User" name="UserID" options={snapshot.lookups.users} form={form} set={set} />
+          <Field label="Join date" name="JoinDate" type="date" form={form} set={set} />
+          <SelectField label="Role" name="OrgRole" form={form} set={set} options={["Member", "Coordinator", "Officer", "Director"]} />
+        </>}
+        {table === "Registration" && <>
+          <LookupField label="User" name="UserID" options={snapshot.lookups.users} form={form} set={set} />
+          <LookupField label="Opportunity" name="OpportunityID" options={snapshot.lookups.opportunities} form={form} set={set} />
+          <Field label="Registration date" name="RegistrationDate" type="date" form={form} set={set} />
+          <SelectField label="Status" name="Status" form={form} set={set} options={["Pending", "Confirmed", "Cancelled", "Completed"]} />
+          <Field label="Hours logged" name="HoursLogged" type="number" form={form} set={set} min={0} max={24} step={0.25} />
+        </>}
+        <div className="modal-actions">
+          <button type="button" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="primary-button" disabled={saving}>{saving ? "Saving..." : "Insert record"}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
-function InsertDialog({
-  table,
-  data,
-  open,
-  saving,
-  onOpenChange,
-  onSave,
-}: {
-  table: TableName;
-  data: Snapshot;
-  open: boolean;
-  saving: boolean;
-  onOpenChange: (v: boolean) => void;
-  onSave: (v: Record<string, any>) => void;
-}) {
-  const [form, setForm] = useState<Record<string, any>>({});
-  useEffect(() => {
-    if (open)
-      setForm(
-        table === "OrganizationMember"
-          ? { JoinDate: today(), OrgRole: "Member" }
-          : table === "Registration"
-            ? { RegistrationDate: today(), Status: "Pending", HoursLogged: 0 }
-            : {},
-      );
-  }, [open, table]);
-  const set = (key: string, value: any) =>
-    setForm((prev) => ({ ...prev, [key]: value }));
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    onSave(form);
-  }
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="insert-dialog">
-        <DialogHeader>
-          <DialogTitle>Insert {tableInfo[table].singular}</DialogTitle>
-          <DialogDescription>
-            This creates a new row in the <code>{table}</code> table.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit} className="insert-form">
-          {table === "Organization" && (
-            <>
-              <Field label="Organization name">
-                <Input
-                  required
-                  maxLength={100}
-                  value={form.Name ?? ""}
-                  onChange={(e) => set("Name", e.target.value)}
-                />
-              </Field>
-              <Field label="Type">
-                <SelectInput
-                  required
-                  value={form.Type ?? ""}
-                  onChange={(e) => set("Type", e.target.value)}
-                  options={[
-                    "Nonprofit",
-                    "Government",
-                    "School",
-                    "Community Group",
-                    "Business",
-                  ]}
-                />
-              </Field>
-              <Field label="Contact email">
-                <Input
-                  required
-                  type="email"
-                  maxLength={100}
-                  value={form.ContactEmail ?? ""}
-                  onChange={(e) => set("ContactEmail", e.target.value)}
-                />
-              </Field>
-            </>
-          )}
-          {table === "Users" && (
-            <>
-              <div className="form-pair">
-                <Field label="First name">
-                  <Input
-                    required
-                    maxLength={50}
-                    value={form.FName ?? ""}
-                    onChange={(e) => set("FName", e.target.value)}
-                  />
-                </Field>
-                <Field label="Last name">
-                  <Input
-                    required
-                    maxLength={50}
-                    value={form.LName ?? ""}
-                    onChange={(e) => set("LName", e.target.value)}
-                  />
-                </Field>
-              </div>
-              <Field label="Email">
-                <Input
-                  required
-                  type="email"
-                  maxLength={100}
-                  value={form.Email ?? ""}
-                  onChange={(e) => set("Email", e.target.value)}
-                />
-              </Field>
-              <p className="form-note">
-                New users receive the base User role automatically.
-              </p>
-            </>
-          )}
-          {table === "VolunteerOpportunity" && (
-            <>
-              <Field label="Organization">
-                <LookupSelect
-                  value={form.OrgID ?? ""}
-                  onChange={(v) => set("OrgID", v)}
-                  options={data.lookups.organizations}
-                />
-              </Field>
-              <Field label="Title">
-                <Input
-                  required
-                  maxLength={150}
-                  value={form.Title ?? ""}
-                  onChange={(e) => set("Title", e.target.value)}
-                />
-              </Field>
-              <Field label="Event date">
-                <Input
-                  required
-                  type="date"
-                  value={form.EventDate ?? ""}
-                  onChange={(e) => set("EventDate", e.target.value)}
-                />
-              </Field>
-              <Field label="Location">
-                <Input
-                  required
-                  maxLength={150}
-                  value={form.Location ?? ""}
-                  onChange={(e) => set("Location", e.target.value)}
-                />
-              </Field>
-            </>
-          )}
-          {table === "OrganizationMember" && (
-            <>
-              <Field label="Organization">
-                <LookupSelect
-                  value={form.OrgID ?? ""}
-                  onChange={(v) => set("OrgID", v)}
-                  options={data.lookups.organizations}
-                />
-              </Field>
-              <Field label="User">
-                <LookupSelect
-                  value={form.UserID ?? ""}
-                  onChange={(v) => set("UserID", v)}
-                  options={data.lookups.users}
-                />
-              </Field>
-              <div className="form-pair">
-                <Field label="Join date">
-                  <Input
-                    required
-                    type="date"
-                    value={form.JoinDate ?? ""}
-                    onChange={(e) => set("JoinDate", e.target.value)}
-                  />
-                </Field>
-                <Field label="Organization role">
-                  <SelectInput
-                    required
-                    value={form.OrgRole ?? "Member"}
-                    onChange={(e) => set("OrgRole", e.target.value)}
-                    options={["Member", "Coordinator", "Officer", "Director"]}
-                  />
-                </Field>
-              </div>
-            </>
-          )}
-          {table === "Registration" && (
-            <>
-              <Field label="User">
-                <LookupSelect
-                  value={form.UserID ?? ""}
-                  onChange={(v) => set("UserID", v)}
-                  options={data.lookups.users}
-                />
-              </Field>
-              <Field label="Opportunity">
-                <LookupSelect
-                  value={form.OpportunityID ?? ""}
-                  onChange={(v) => set("OpportunityID", v)}
-                  options={data.lookups.opportunities}
-                />
-              </Field>
-              <div className="form-pair">
-                <Field label="Registration date">
-                  <Input
-                    required
-                    type="date"
-                    value={form.RegistrationDate ?? ""}
-                    onChange={(e) => set("RegistrationDate", e.target.value)}
-                  />
-                </Field>
-                <Field label="Status">
-                  <SelectInput
-                    required
-                    value={form.Status ?? "Pending"}
-                    onChange={(e) => set("Status", e.target.value)}
-                    options={["Pending", "Confirmed", "Cancelled", "Completed"]}
-                  />
-                </Field>
-              </div>
-              <Field label="Hours logged">
-                <Input
-                  required
-                  type="number"
-                  min={0}
-                  max={24}
-                  step={0.5}
-                  value={form.HoursLogged ?? 0}
-                  onChange={(e) => set("HoursLogged", Number(e.target.value))}
-                />
-              </Field>
-            </>
-          )}
-          <div className="dialog-actions">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={saving}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? <LoaderCircle className="animate-spin" /> : <Plus />}
-              Insert row
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
+type FieldProps = { label: string; name: string; form: Record<string, string | number>; set: (name: string, value: string | number) => void };
+
+function Field({ label, name, form, set, ...inputProps }: FieldProps & Omit<React.InputHTMLAttributes<HTMLInputElement>, "form" | "name" | "value" | "onChange">) {
+  return <label><span>{label}</span><input required name={name} value={form[name] ?? ""} onChange={(event) => set(name, event.target.value)} {...inputProps} /></label>;
 }
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="field">
-      <span>{label}</span>
+
+function SelectField({ label, name, form, set, options }: FieldProps & { options: string[] }) {
+  return <label><span>{label}</span><select required value={form[name] ?? ""} onChange={(event) => set(name, event.target.value)}>
+    <option value="">Choose one</option>{options.map((option) => <option key={option}>{option}</option>)}
+  </select></label>;
+}
+
+function LookupField({ label, name, form, set, options }: FieldProps & { options: { id: number; label: string }[] }) {
+  return <label><span>{label}</span><select required value={form[name] ?? ""} onChange={(event) => set(name, Number(event.target.value))}>
+    <option value="">Choose one</option>{options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+  </select></label>;
+}
+
+function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <section className="modal" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="modal-header"><h2>{title}</h2><button aria-label="Close" onClick={onClose}>×</button></div>
       {children}
-    </label>
-  );
-}
-function SelectInput({
-  value,
-  onChange,
-  options,
-  required,
-}: {
-  value: any;
-  onChange: (e: any) => void;
-  options: string[];
-  required?: boolean;
-}) {
-  return (
-    <select required={required} value={value} onChange={onChange}>
-      <option value="" disabled>
-        Select…
-      </option>
-      {options.map((x) => (
-        <option key={x} value={x}>
-          {x}
-        </option>
-      ))}
-    </select>
-  );
-}
-function LookupSelect({
-  value,
-  onChange,
-  options,
-}: {
-  value: any;
-  onChange: (v: string) => void;
-  options: { id: number; label: string }[];
-}) {
-  return (
-    <select required value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="" disabled>
-        Select…
-      </option>
-      {options.map((x) => (
-        <option key={x.id} value={x.id}>
-          {x.label}
-        </option>
-      ))}
-    </select>
-  );
+    </section>
+  </div>;
 }

@@ -32,7 +32,7 @@ async function requireAdmin() {
         { status: 401 },
       ),
     };
-  const adminEmail = (env as any).TREEFINDER_ADMIN_EMAIL?.toLowerCase();
+  const adminEmail = env.TREEFINDER_ADMIN_EMAIL?.toLowerCase();
   if (!adminEmail || user.email.toLowerCase() !== adminEmail)
     return {
       error: Response.json(
@@ -68,7 +68,7 @@ async function snapshot() {
         .prepare(
           "SELECT OrgID, Name, Type, ContactEmail FROM Organization ORDER BY OrgID DESC",
         )
-        .all(),
+        .all<{ OrgID: number; Name: string; Type: string; ContactEmail: string }>(),
       db
         .prepare(
           `SELECT u.UserID, u.FName, u.LName, u.Email,
@@ -77,7 +77,7 @@ async function snapshot() {
       LEFT JOIN Role r ON r.RoleID=ur.RoleID
       GROUP BY u.UserID ORDER BY u.UserID DESC`,
         )
-        .all(),
+        .all<{ UserID: number; FName: string; LName: string; Email: string; Roles: string }>(),
       db
         .prepare(
           `SELECT v.OpportunityID, v.OrgID, o.Name AS Organization, v.Title, v.EventDate, v.Location,
@@ -86,7 +86,7 @@ async function snapshot() {
       LEFT JOIN Registration r ON r.OpportunityID=v.OpportunityID
       GROUP BY v.OpportunityID ORDER BY v.EventDate, v.OpportunityID`,
         )
-        .all(),
+        .all<{ OpportunityID: number; OrgID: number; Organization: string; Title: string; EventDate: string; Location: string; SignUps: number }>(),
       db
         .prepare(
           `SELECT m.MembershipID, m.OrgID, o.Name AS Organization, m.UserID,
@@ -94,7 +94,7 @@ async function snapshot() {
       FROM OrganizationMember m JOIN Organization o ON o.OrgID=m.OrgID
       JOIN Users u ON u.UserID=m.UserID ORDER BY m.MembershipID DESC`,
         )
-        .all(),
+        .all<{ MembershipID: number; OrgID: number; Organization: string; UserID: number; Member: string; JoinDate: string; OrgRole: string }>(),
       db
         .prepare(
           `SELECT r.RegistrationID, r.UserID, u.FName || ' ' || u.LName AS Volunteer,
@@ -103,8 +103,8 @@ async function snapshot() {
       JOIN VolunteerOpportunity v ON v.OpportunityID=r.OpportunityID
       ORDER BY r.RegistrationID DESC`,
         )
-        .all(),
-      db.prepare("SELECT RoleID, RoleName FROM Role ORDER BY RoleID").all(),
+        .all<{ RegistrationID: number; UserID: number; Volunteer: string; OpportunityID: number; Opportunity: string; RegistrationDate: string; Status: string; HoursLogged: number }>(),
+      db.prepare("SELECT RoleID, RoleName FROM Role ORDER BY RoleID").all<{ RoleID: number; RoleName: string }>(),
     ]);
   return {
     counts: countRows,
@@ -118,14 +118,14 @@ async function snapshot() {
     lookups: {
       organizations: [...organizations.results]
         .reverse()
-        .map((row: any) => ({ id: row.OrgID, label: row.Name })),
+        .map((row) => ({ id: row.OrgID, label: row.Name })),
       users: [...users.results]
         .reverse()
-        .map((row: any) => ({
+        .map((row) => ({
           id: row.UserID,
           label: `${row.FName} ${row.LName}`,
         })),
-      opportunities: opportunities.results.map((row: any) => ({
+      opportunities: opportunities.results.map((row) => ({
         id: row.OpportunityID,
         label: row.Title,
       })),
@@ -160,7 +160,10 @@ export async function POST(request: Request) {
       );
     const auth = await requireAdmin();
     if (auth.error) return auth.error;
-    const body = (await request.json()) as any;
+    const body = (await request.json()) as {
+      table?: unknown;
+      data?: Record<string, unknown>;
+    };
     const table = body.table as TableName;
     if (!TABLES[table])
       return Response.json(
@@ -289,9 +292,9 @@ export async function POST(request: Request) {
         .run();
     }
     return Response.json({ ok: true, snapshot: await snapshot() });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Phase 2 database insert:", error);
-    const message = String(error?.message ?? "");
+    const message = error instanceof Error ? error.message : "";
     if (/UNIQUE constraint failed/i.test(message))
       return Response.json(
         {
@@ -324,7 +327,7 @@ export async function DELETE(request: Request) {
       );
     const auth = await requireAdmin();
     if (auth.error) return auth.error;
-    const body = (await request.json()) as any;
+    const body = (await request.json()) as { table?: unknown; id?: unknown };
     const table = body.table as TableName;
     const config = TABLES[table];
     const id = int(body.id);

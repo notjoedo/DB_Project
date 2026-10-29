@@ -24,7 +24,7 @@ The script creates `volunteer_db`, its seven normalized tables, foreign keys, va
 
 ## Phase 2 interface
 
-The Admin database page provides:
+The single database page provides:
 
 - Searchable views of all five major tables.
 - Table row counts read from the database.
@@ -33,7 +33,7 @@ The Admin database page provides:
 - Database-enforced uniqueness, checks, and foreign-key cascade behavior.
 - Human-readable joined data, such as organization names, member names, opportunity titles, and registration counts.
 
-The Overview and Opportunities pages also read joined data from the database. The previous NASA, Sentinel-2, NYC Open Data, and live map requests have been removed.
+The previous dashboard, opportunities page, NASA, Sentinel-2, NYC Open Data, and live map requests have been removed to keep the project focused on the database requirements.
 
 ## Hosted and local database note
 
