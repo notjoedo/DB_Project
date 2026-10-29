@@ -1,57 +1,40 @@
-# Treefinder — Phase 2 Volunteer Database
+# Treefinder — Phase 2 MySQL Project
 
-Treefinder is a simple volunteer-management web application for the Phase 2 database requirements. The interface reads from the database, displays ready sample data, inserts records, and permanently deletes records from the five major tables.
+This is a small local web app for the Phase 2 database requirements. It displays sample data and supports inserts and permanent deletes for the five major tables.
 
-## MySQL source of truth
+## Start the project
 
-The supplied MySQL 8 script is [`sqlproject/volunteer_db.sql`](sqlproject/volunteer_db.sql). It is preserved unchanged. Run it in MySQL Workbench or from the command line:
-
-```sh
-mysql -u root -p < sqlproject/volunteer_db.sql
-```
-
-The script creates `volunteer_db`, its seven normalized tables, foreign keys, validation checks, and sample data. The major tables already contain at least 20 tuples:
-
-| Major table          | Initial rows |
-| -------------------- | -----------: |
-| Organization         |           20 |
-| Users                |           30 |
-| VolunteerOpportunity |           25 |
-| OrganizationMember   |           30 |
-| Registration         |           40 |
-
-`Role` is a four-row lookup table. `UserRole` is a supporting many-to-many relationship table with 43 initial rows.
-
-## Phase 2 interface
-
-The single database page provides:
-
-- Searchable views of all five major tables.
-- Table row counts read from the database.
-- Validated insert forms for each major table.
-- Permanent delete actions with a confirmation dialog.
-- Database-enforced uniqueness, checks, and foreign-key cascade behavior.
-- Human-readable joined data, such as organization names, member names, opportunity titles, and registration counts.
-
-The previous dashboard, opportunities page, NASA, Sentinel-2, NYC Open Data, and live map requests have been removed to keep the project focused on the database requirements.
-
-## Hosted and local database note
-
-The hosted Sites runtime cannot open a raw MySQL TCP connection. Its deployment uses Cloudflare D1 with a compatibility migration that mirrors the table names, columns, relationships, constraints, and sample rows in the unchanged MySQL script. The GUI sends the same logical insert and delete operations to that database.
-
-For the course submission, `volunteer_db.sql` remains the MySQL deliverable and can be run directly in MySQL Workbench. The compatibility migration is [`drizzle/0001_phase2_volunteer.sql`](drizzle/0001_phase2_volunteer.sql).
-
-## Run the web app locally
+Docker Desktop must be running. Then use:
 
 ```sh
 npm install
+npm run db:start
 npm run dev
 ```
 
-The local Sites development identity uses the administrator email in `.env`. Production administrator access is restricted to the configured `TREEFINDER_ADMIN_EMAIL`.
+Open [http://localhost:3000](http://localhost:3000).
 
-Build with:
+The MySQL container runs `sqlproject/volunteer_db.sql` automatically the first time it starts. The script creates the `volunteer_db` database, seven tables, constraints, and all sample data.
+
+## Useful commands
 
 ```sh
-npm run build
+npm run db:start   # start MySQL
+npm run db:stop    # stop MySQL
+npm run db:reset   # erase the local database and rerun volunteer_db.sql
+npm run dev        # start the web app
 ```
+
+`db:reset` permanently deletes local database changes before recreating the sample data.
+
+## Sample data
+
+| Major table | Rows |
+| --- | ---: |
+| Organization | 20 |
+| Users | 30 |
+| VolunteerOpportunity | 25 |
+| OrganizationMember | 30 |
+| Registration | 40 |
+
+The connection settings are in `.env.local`. Example values are provided in `.env.example`.

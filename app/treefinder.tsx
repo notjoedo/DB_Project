@@ -44,7 +44,7 @@ const emptySnapshot: Snapshot = {
 };
 const today = () => new Date().toISOString().slice(0, 10);
 
-export default function Treefinder({ user }: { user: { id: string; name: string; email: string } | null }) {
+export default function Treefinder() {
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [table, setTable] = useState<TableName>("Organization");
   const [query, setQuery] = useState("");
@@ -71,10 +71,9 @@ export default function Treefinder({ user }: { user: { id: string; name: string;
   }, []);
 
   useEffect(() => {
-    if (!user) return;
     const timer = window.setTimeout(load, 0);
     return () => window.clearTimeout(timer);
-  }, [user, load]);
+  }, [load]);
 
   const rows = snapshot.tables[table];
   const filteredRows = useMemo(() => {
@@ -121,20 +120,11 @@ export default function Treefinder({ user }: { user: { id: string; name: string;
     }
   }
 
-  if (!user) return (
-    <main className="login">
-      <div className="logo">TF</div>
-      <h1>Treefinder Database</h1>
-      <p>Sign in as the administrator to manage volunteer data.</p>
-      <a className="primary-button" href="/signin-with-chatgpt?return_to=%2F">Sign in</a>
-    </main>
-  );
-
   return (
     <main className="page">
       <header className="topbar">
         <div><span className="logo small">TF</span><strong>Treefinder</strong></div>
-        <div className="account"><span>{user.name}</span><a href="/signout-with-chatgpt?return_to=%2F">Sign out</a></div>
+        <div className="account"><span>Local MySQL</span></div>
       </header>
 
       <section className="content">
