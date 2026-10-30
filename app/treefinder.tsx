@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type TableName = "Organization" | "Users" | "VolunteerOpportunity" | "OrganizationMember" | "Registration";
 type Row = Record<string, string | number | null>;
@@ -42,12 +42,23 @@ const emptySnapshot: Snapshot = {
   tables: { Organization: [], Users: [], VolunteerOpportunity: [], OrganizationMember: [], Registration: [] },
   lookups: { organizations: [], users: [], opportunities: [] },
 };
+const ROW_HEIGHT = 41;
+const HEADER_HEIGHT = 41;
+function pageNumbers(current: number, count: number): (number | null)[] {
+  if (count <= 7) return Array.from({ length: count }, (_, i) => i);
+  const pages = new Set([0, count - 1, current - 1, current, current + 1]);
+  const sorted = [...pages].filter((n) => n >= 0 && n < count).sort((x, y) => x - y);
+  return sorted.flatMap((n, i) => (i && n - sorted[i - 1] > 1 ? [null, n] : [n]));
+}
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function Treefinder() {
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [table, setTable] = useState<TableName>("Organization");
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(8);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -75,11 +86,24 @@ export default function Treefinder() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const fit = () => setPageSize(Math.max(3, Math.floor((el.clientHeight - HEADER_HEIGHT) / ROW_HEIGHT)));
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loading]);
+
   const rows = snapshot.tables[table];
   const filteredRows = useMemo(() => {
     const search = query.trim().toLowerCase();
     return search ? rows.filter((row) => Object.values(row).join(" ").toLowerCase().includes(search)) : rows;
   }, [query, rows]);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageRows = filteredRows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
 
   async function insert(data: Record<string, string | number>) {
     setSaving(true);
@@ -123,22 +147,21 @@ export default function Treefinder() {
   return (
     <main className="page">
       <header className="topbar">
-        <div><span className="logo small">TF</span><strong>Treefinder</strong></div>
+        <div><img className="brand-logo" src="/logo.png" alt="Three Trees Tree Conservation" /></div>
+        <nav className="nav-tabs" aria-label="Tables">
+          {(Object.keys(tables) as TableName[]).map((name) => (
+            <button key={name} className={table === name ? "active" : ""} onClick={() => { setTable(name); setQuery(""); setPage(0); setMessage(""); }}>
+              {tables[name].label}<strong>{snapshot.tables[name].length}</strong>
+            </button>
+          ))}
+        </nav>
         <div className="account"><span>Local MySQL</span></div>
       </header>
 
       <section className="content">
         <div className="title-row">
-          <div><p className="eyebrow">PHASE 2</p><h1>Database Manager</h1><p>View, insert, and permanently delete records.</p></div>
+          <h1>Database Manager</h1>
           <button className="primary-button" onClick={() => setAdding(true)}>+ Add {tables[table].singular}</button>
-        </div>
-
-        <div className="counts">
-          {(Object.keys(tables) as TableName[]).map((name) => (
-            <button key={name} className={table === name ? "active" : ""} onClick={() => { setTable(name); setQuery(""); setMessage(""); }}>
-              <strong>{snapshot.tables[name].length}</strong><span>{tables[name].label}</span>
-            </button>
-          ))}
         </div>
 
         {message && <p className="notice">{message}</p>}
@@ -147,15 +170,15 @@ export default function Treefinder() {
         <section className="database-card">
           <div className="table-toolbar">
             <div><h2>{tables[table].label}</h2><span>{rows.length} rows</span></div>
-            <input aria-label={`Search ${tables[table].label}`} placeholder="Search records..." value={query} onChange={(event) => setQuery(event.target.value)} />
+            <input aria-label={`Search ${tables[table].label}`} placeholder="Search records..." value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} />
           </div>
 
           {loading ? <p className="state">Loading database...</p> : (
-            <div className="table-wrap">
+            <div className="table-wrap" ref={wrapRef}>
               <table>
                 <thead><tr>{tables[table].columns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Action</th></tr></thead>
                 <tbody>
-                  {filteredRows.map((row) => {
+                  {pageRows.map((row) => {
                     const id = Number(row[tables[table].id]);
                     return <tr key={id}>
                       {tables[table].columns.map((column) => <td key={column.key}>{String(row[column.key] ?? "—")}</td>)}
@@ -168,6 +191,18 @@ export default function Treefinder() {
                   {!filteredRows.length && <tr><td colSpan={tables[table].columns.length + 1} className="state">No matching records.</td></tr>}
                 </tbody>
               </table>
+            </div>
+          )}
+          {!loading && (
+            <div className="pagination">
+              <span>{currentPage * pageSize + 1}–{Math.min((currentPage + 1) * pageSize, filteredRows.length)} of {filteredRows.length}</span>
+              <div className="pager" role="navigation" aria-label="Pagination">
+                <button aria-label="Previous page" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 0}>‹</button>
+                {pageNumbers(currentPage, pageCount).map((n, i) => n === null
+                  ? <span key={`gap${i}`} className="gap">…</span>
+                  : <button key={n} className={n === currentPage ? "current" : ""} aria-current={n === currentPage ? "page" : undefined} onClick={() => setPage(n)}>{n + 1}</button>)}
+                <button aria-label="Next page" onClick={() => setPage(currentPage + 1)} disabled={currentPage >= pageCount - 1}>›</button>
+              </div>
             </div>
           )}
         </section>
