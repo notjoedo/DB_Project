@@ -1,4 +1,5 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
+import { requireUser } from "@/lib/auth";
 import { database } from "@/lib/server";
 
 type TableName = "Organization" | "Users" | "VolunteerOpportunity" | "OrganizationMember" | "Registration" | "PlantingSite";
@@ -75,7 +76,10 @@ async function snapshot() {
   };
 }
 
-export async function GET() {
+// The Database Manager is for administrators only.
+export async function GET(request: Request) {
+  const { denied } = await requireUser(request, "Admin");
+  if (denied) return denied;
   try {
     return Response.json(await snapshot());
   } catch (error) {
@@ -85,6 +89,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const { denied } = await requireUser(request, "Admin");
+  if (denied) return denied;
   try {
     const body = (await request.json()) as { table?: unknown; data?: Record<string, unknown> };
     const table = body.table as TableName;
@@ -135,6 +141,8 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  const { denied } = await requireUser(request, "Admin");
+  if (denied) return denied;
   try {
     const body = (await request.json()) as { table?: unknown; id?: unknown };
     const table = body.table as TableName;

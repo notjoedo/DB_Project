@@ -296,6 +296,8 @@ INSERT INTO Registration (UserID, OpportunityID, RegistrationDate, Status, Hours
 --  PLANTING MAP EXTENSION
 --  Where should more trees go? Each PlantingSite stores location and
 --  canopy/heat measurements; the SitePriority view ranks them by need.
+--  Volunteer events get map coordinates so coordinators can schedule
+--  them anywhere on the map.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -355,11 +357,20 @@ CREATE TABLE SiteRecommendation (
     CONSTRAINT CK_Rec_Quantity CHECK (Quantity > 0)
 );
 
--- PlantingSite 1 --Hosts-- M VolunteerOpportunity (optional)
+-- Map location for each event, the planting area it serves (optional),
+-- and the coordinator who scheduled it (Users 1 --Schedules-- M Opportunity)
 ALTER TABLE VolunteerOpportunity
-    ADD COLUMN SiteID INT NULL,
+    ADD COLUMN SiteID     INT           NULL,
+    ADD COLUMN Latitude   DECIMAL(9,6)  NULL,
+    ADD COLUMN Longitude  DECIMAL(9,6)  NULL,
+    ADD COLUMN CreatedBy  INT           NULL,
     ADD CONSTRAINT FK_Opportunity_Site FOREIGN KEY (SiteID)
-        REFERENCES PlantingSite(SiteID) ON DELETE SET NULL ON UPDATE CASCADE;
+        REFERENCES PlantingSite(SiteID) ON DELETE SET NULL ON UPDATE CASCADE,
+    ADD CONSTRAINT FK_Opportunity_Creator FOREIGN KEY (CreatedBy)
+        REFERENCES Users(UserID) ON DELETE SET NULL ON UPDATE CASCADE,
+    ADD CONSTRAINT CK_Opportunity_Latitude  CHECK (Latitude  BETWEEN -90  AND 90),
+    ADD CONSTRAINT CK_Opportunity_Longitude CHECK (Longitude BETWEEN -180 AND 180),
+    ADD CONSTRAINT CK_Opportunity_Coords CHECK ((Latitude IS NULL) = (Longitude IS NULL));
 
 -- NeedScore (0-100) is derived, so it lives in a view instead of a column:
 -- 50% missing canopy, 30% paved surface, 20% summer surface heat above 85F.
@@ -435,6 +446,41 @@ UPDATE VolunteerOpportunity SET SiteID = 8  WHERE OpportunityID = 16;
 UPDATE VolunteerOpportunity SET SiteID = 14 WHERE OpportunityID = 22;
 UPDATE VolunteerOpportunity SET SiteID = 13 WHERE OpportunityID = 25;
 
+-- Those events happen at their site, scheduled by one of the organization's coordinators
+UPDATE VolunteerOpportunity v JOIN PlantingSite p ON p.SiteID = v.SiteID
+SET v.Latitude  = p.Latitude,
+    v.Longitude = p.Longitude,
+    v.CreatedBy = (SELECT MIN(m.UserID) FROM OrganizationMember m
+                   WHERE m.OrgID = v.OrgID AND m.OrgRole IN ('Coordinator','Officer','Director'));
+
+-- =====================================================================
+--  AUTHENTICATION
+--  Passwords are stored only as scrypt hashes. Sample users have no
+--  password until one is set with: npm run user:password -- <email>
+-- =====================================================================
+
+ALTER TABLE Users
+    ADD COLUMN PasswordHash  VARCHAR(255)  NULL;
+
+-- ---------------------------------------------------------------------
+-- 11. RefreshToken  (Users 1 --Holds-- M RefreshToken; one per login session)
+--     Only a SHA-256 hash of each token is stored. Tokens rotate on every
+--     refresh; reusing a revoked token revokes all of that user's sessions.
+-- ---------------------------------------------------------------------
+CREATE TABLE RefreshToken (
+    TokenID    INT       NOT NULL AUTO_INCREMENT,
+    UserID     INT       NOT NULL,
+    TokenHash  CHAR(64)  NOT NULL,
+    CreatedAt  DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ExpiresAt  DATETIME  NOT NULL,
+    RevokedAt  DATETIME  NULL,
+    CONSTRAINT PK_RefreshToken PRIMARY KEY (TokenID),
+    CONSTRAINT UQ_RefreshToken_Hash UNIQUE (TokenHash),
+    CONSTRAINT FK_RefreshToken_User FOREIGN KEY (UserID)
+        REFERENCES Users(UserID) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT CK_RefreshToken_Expiry CHECK (ExpiresAt > CreatedAt)
+);
+
 -- =====================================================================
 --  VERIFICATION QUERIES (screenshot these results for your submission)
 -- =====================================================================
@@ -449,7 +495,8 @@ UNION ALL SELECT 'OrganizationMember',   COUNT(*) FROM OrganizationMember
 UNION ALL SELECT 'Registration',         COUNT(*) FROM Registration
 UNION ALL SELECT 'TreeSpecies',          COUNT(*) FROM TreeSpecies
 UNION ALL SELECT 'PlantingSite',         COUNT(*) FROM PlantingSite
-UNION ALL SELECT 'SiteRecommendation',   COUNT(*) FROM SiteRecommendation;
+UNION ALL SELECT 'SiteRecommendation',   COUNT(*) FROM SiteRecommendation
+UNION ALL SELECT 'RefreshToken',         COUNT(*) FROM RefreshToken;
 
 -- Total volunteer hours per user (joins across 2 tables)
 SELECT u.UserID, CONCAT(u.FName, ' ', u.LName) AS Volunteer,

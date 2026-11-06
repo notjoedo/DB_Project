@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AuthProvider, apiFetch, useAuth } from "./auth-client";
+import Modal from "./modal";
 import PlantingMap from "./planting-map";
+import ProfilePage from "./profile";
 
 type TableName = "Organization" | "Users" | "VolunteerOpportunity" | "OrganizationMember" | "Registration" | "PlantingSite";
 type Row = Record<string, string | number | null>;
@@ -58,8 +61,16 @@ function pageNumbers(current: number, count: number): (number | null)[] {
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function Treefinder() {
+  return <AuthProvider><App /></AuthProvider>;
+}
+
+function App() {
+  const { user, ready, hasRole, promptLogin, logout } = useAuth();
+  const isAdmin = hasRole("Admin");
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
-  const [view, setView] = useState<"map" | "database">("map");
+  const [view, setView] = useState<"map" | "database" | "profile">("map");
+  // Fall back to the map when the database or profile isn't available to this visitor.
+  const shown = (view === "database" && !isAdmin) || (view === "profile" && !user) ? "map" : view;
   const [table, setTable] = useState<TableName>("Organization");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
@@ -76,7 +87,7 @@ export default function Treefinder() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/admin-data");
+      const response = await apiFetch("/api/admin-data");
       const result = (await response.json()) as Snapshot & { error?: string };
       if (!response.ok) throw new Error(result.error);
       setSnapshot(result);
@@ -87,10 +98,12 @@ export default function Treefinder() {
     }
   }, []);
 
+  // Only administrators can read the Database Manager tables.
   useEffect(() => {
+    if (!isAdmin) return;
     const timer = window.setTimeout(load, 0);
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [load, isAdmin]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -100,7 +113,7 @@ export default function Treefinder() {
     const observer = new ResizeObserver(fit);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [loading, view]);
+  }, [loading, shown]);
 
   const rows = snapshot.tables[table];
   const filteredRows = useMemo(() => {
@@ -115,9 +128,7 @@ export default function Treefinder() {
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch("/api/admin-data", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ table, data }),
-      });
+      const response = await apiFetch("/api/admin-data", { method: "POST", body: JSON.stringify({ table, data }) });
       const result = (await response.json()) as { error?: string; snapshot: Snapshot };
       if (!response.ok) throw new Error(result.error);
       setSnapshot(result.snapshot);
@@ -135,9 +146,7 @@ export default function Treefinder() {
     setSaving(true);
     setMessage("");
     try {
-      const response = await fetch("/api/admin-data", {
-        method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ table, id: deleteTarget.id }),
-      });
+      const response = await apiFetch("/api/admin-data", { method: "DELETE", body: JSON.stringify({ table, id: deleteTarget.id }) });
       const result = (await response.json()) as { error?: string; snapshot: Snapshot };
       if (!response.ok) throw new Error(result.error);
       setSnapshot(result.snapshot);
@@ -155,24 +164,41 @@ export default function Treefinder() {
       <header className="topbar">
         <div><img className="brand-logo" src="/logo.png" alt="Three Trees Tree Conservation" /></div>
         <nav className="nav-tabs" aria-label="Views">
-          <button className={view === "map" ? "active" : ""} onClick={() => setView("map")}>Planting Map</button>
-          <span className="nav-divider" aria-hidden="true" />
-          {(Object.keys(tables) as TableName[]).map((name) => (
-            <button key={name} className={view === "database" && table === name ? "active" : ""} onClick={() => { setView("database"); setTable(name); setQuery(""); setPage(0); setMessage(""); }}>
-              {tables[name].label}<strong>{snapshot.tables[name].length}</strong>
-            </button>
-          ))}
+          <button className={shown === "map" ? "active" : ""} onClick={() => setView("map")}>Planting Map</button>
+          {isAdmin && <>
+            <span className="nav-divider" aria-hidden="true" />
+            {(Object.keys(tables) as TableName[]).map((name) => (
+              <button key={name} className={shown === "database" && table === name ? "active" : ""} onClick={() => { setView("database"); setTable(name); setQuery(""); setPage(0); setMessage(""); }}>
+                {tables[name].label}<strong>{snapshot.tables[name].length}</strong>
+              </button>
+            ))}
+          </>}
         </nav>
-        <div className="account"><span>Local MySQL</span></div>
+        <div className="account">
+          {!ready ? null : user ? <>
+            <button className={`account-button${shown === "profile" ? " active" : ""}`} onClick={() => setView("profile")}>
+              {user.FName} {user.LName}{isAdmin && <em>Admin</em>}
+            </button>
+            <button className="account-link" onClick={logout}>Log out</button>
+          </> : <>
+            <button className="account-link" onClick={() => promptLogin("login")}>Log in</button>
+            <button className="account-button" onClick={() => promptLogin("register")}>Sign up</button>
+          </>}
+        </div>
       </header>
 
-      {view === "map" ? (
+      {shown === "profile" ? (
+      <section className="content">
+        <div className="title-row"><h1>My Profile</h1></div>
+        <ProfilePage />
+      </section>
+      ) : shown === "map" ? (
       <section className="content">
         <div className="title-row">
           <h1>Planting Map</h1>
           <span className="subtitle">Blacksburg, VA · sites ranked by canopy gap, paved surface, and heat</span>
         </div>
-        <PlantingMap onChange={load} />
+        <PlantingMap onChange={isAdmin ? load : undefined} />
       </section>
       ) : (
       <section className="content">
@@ -306,13 +332,4 @@ function LookupField({ label, name, form, set, options }: FieldProps & { options
   return <label><span>{label}</span><select required value={form[name] ?? ""} onChange={(event) => set(name, Number(event.target.value))}>
     <option value="">Choose one</option>{options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
   </select></label>;
-}
-
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section className="modal" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="modal-header"><h2>{title}</h2><button aria-label="Close" onClick={onClose}>×</button></div>
-      {children}
-    </section>
-  </div>;
 }

@@ -12,9 +12,12 @@
     "lint": "eslint . --ignore-pattern .next",
     "db:start": "docker compose up -d --wait",
     "db:stop": "docker compose down",
-    "db:reset": "docker compose down -v && docker compose up -d --wait"
+    "db:reset": "docker compose down -v && docker compose up -d --wait",
+    "role": "node --env-file-if-exists=.env.local scripts/roles.mjs",
+    "user:password": "node --env-file-if-exists=.env.local scripts/set-password.mjs"
   },
   "dependencies": {
+    "jose": "^6.1.0",
     "leaflet": "^1.9.4",
     "mysql2": "^3.24.6",
     "next": "^16.4.3",
