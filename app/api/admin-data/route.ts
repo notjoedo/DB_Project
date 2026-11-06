@@ -1,13 +1,14 @@
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { database } from "@/lib/server";
 
-type TableName = "Organization" | "Users" | "VolunteerOpportunity" | "OrganizationMember" | "Registration";
+type TableName = "Organization" | "Users" | "VolunteerOpportunity" | "OrganizationMember" | "Registration" | "PlantingSite";
 const TABLES: Record<TableName, string> = {
   Organization: "OrgID",
   Users: "UserID",
   VolunteerOpportunity: "OpportunityID",
   OrganizationMember: "MembershipID",
   Registration: "RegistrationID",
+  PlantingSite: "SiteID",
 };
 
 interface CountRow extends RowDataPacket { RowCount: number }
@@ -15,6 +16,7 @@ interface OrganizationRow extends RowDataPacket { OrgID: number; Name: string; T
 interface UserRow extends RowDataPacket { UserID: number; FName: string; LName: string; Email: string; Roles: string }
 interface OpportunityRow extends RowDataPacket { OpportunityID: number; OrgID: number; Organization: string; Title: string; EventDate: string; Location: string; SignUps: number }
 interface MemberRow extends RowDataPacket { MembershipID: number; OrgID: number; Organization: string; UserID: number; Member: string; JoinDate: string; OrgRole: string }
+interface SiteRow extends RowDataPacket { SiteID: number; Name: string; Latitude: number; Longitude: number; CanopyCoverPct: number; NeedScore: number; Status: string; SubmittedBy: string | null }
 interface RegistrationRow extends RowDataPacket { RegistrationID: number; UserID: number; Volunteer: string; OpportunityID: number; Opportunity: string; RegistrationDate: string; Status: string; HoursLogged: number }
 
 const str = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -23,13 +25,13 @@ const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Numbe
 
 async function snapshot() {
   const db = database();
-  const countTables = ["Organization", "Users", "Role", "UserRole", "VolunteerOpportunity", "OrganizationMember", "Registration"] as const;
+  const countTables = ["Organization", "Users", "Role", "UserRole", "VolunteerOpportunity", "OrganizationMember", "Registration", "TreeSpecies", "PlantingSite", "SiteRecommendation"] as const;
   const counts = await Promise.all(countTables.map(async (name) => {
     const [rows] = await db.query<CountRow[]>(`SELECT COUNT(*) AS RowCount FROM ${name}`);
     return { TableName: name, RowCount: Number(rows[0].RowCount) };
   }));
 
-  const [organizationsResult, usersResult, opportunitiesResult, membersResult, registrationsResult] = await Promise.all([
+  const [organizationsResult, usersResult, opportunitiesResult, membersResult, registrationsResult, sitesResult] = await Promise.all([
     db.query<OrganizationRow[]>("SELECT OrgID, Name, Type, ContactEmail FROM Organization ORDER BY OrgID DESC"),
     db.query<UserRow[]>(`SELECT u.UserID, u.FName, u.LName, u.Email,
       COALESCE(GROUP_CONCAT(r.RoleName ORDER BY r.RoleID SEPARATOR ', '), 'User') AS Roles
@@ -51,6 +53,9 @@ async function snapshot() {
       r.OpportunityID, v.Title AS Opportunity, DATE_FORMAT(r.RegistrationDate, '%Y-%m-%d') AS RegistrationDate,
       r.Status, r.HoursLogged FROM Registration r JOIN Users u ON u.UserID=r.UserID
       JOIN VolunteerOpportunity v ON v.OpportunityID=r.OpportunityID ORDER BY r.RegistrationID DESC`),
+    db.query<SiteRow[]>(`SELECT p.SiteID, p.Name, p.Latitude, p.Longitude, p.CanopyCoverPct, p.NeedScore, p.Status,
+      CONCAT(u.FName, ' ', u.LName) AS SubmittedBy FROM SitePriority p
+      LEFT JOIN Users u ON u.UserID=p.SubmittedBy ORDER BY p.SiteID DESC`),
   ]);
 
   const organizations = organizationsResult[0];
@@ -58,9 +63,10 @@ async function snapshot() {
   const opportunities = opportunitiesResult[0];
   const members = membersResult[0];
   const registrations = registrationsResult[0];
+  const sites = sitesResult[0];
   return {
     counts,
-    tables: { Organization: organizations, Users: users, VolunteerOpportunity: opportunities, OrganizationMember: members, Registration: registrations },
+    tables: { Organization: organizations, Users: users, VolunteerOpportunity: opportunities, OrganizationMember: members, Registration: registrations, PlantingSite: sites },
     lookups: {
       organizations: [...organizations].reverse().map((row) => ({ id: row.OrgID, label: row.Name })),
       users: [...users].reverse().map((row) => ({ id: row.UserID, label: `${row.FName} ${row.LName}` })),
@@ -82,7 +88,7 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { table?: unknown; data?: Record<string, unknown> };
     const table = body.table as TableName;
-    if (!TABLES[table]) return Response.json({ error: "Choose a supported table." }, { status: 400 });
+    if (!TABLES[table] || table === "PlantingSite") return Response.json({ error: "Choose a supported table." }, { status: 400 });
     const data = body.data ?? {};
     const db = database();
 

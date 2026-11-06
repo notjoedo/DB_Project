@@ -293,6 +293,149 @@ INSERT INTO Registration (UserID, OpportunityID, RegistrationDate, Status, Hours
 (23, 25, '2026-10-22', 'Pending',   0.0);
 
 -- =====================================================================
+--  PLANTING MAP EXTENSION
+--  Where should more trees go? Each PlantingSite stores location and
+--  canopy/heat measurements; the SitePriority view ranks them by need.
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 8. TreeSpecies
+-- ---------------------------------------------------------------------
+CREATE TABLE TreeSpecies (
+    SpeciesID       INT           NOT NULL AUTO_INCREMENT,
+    CommonName      VARCHAR(60)   NOT NULL,
+    ScientificName  VARCHAR(80)   NOT NULL,
+    MatureHeightFt  SMALLINT      NOT NULL,
+    Category        VARCHAR(20)   NOT NULL,
+    CONSTRAINT PK_TreeSpecies PRIMARY KEY (SpeciesID),
+    CONSTRAINT UQ_TreeSpecies_Scientific UNIQUE (ScientificName),
+    CONSTRAINT CK_TreeSpecies_Category CHECK
+        (Category IN ('Shade','Ornamental','Riparian','Evergreen'))
+);
+
+-- ---------------------------------------------------------------------
+-- 9. PlantingSite  (Users 1 --Submits-- M PlantingSite)
+-- ---------------------------------------------------------------------
+CREATE TABLE PlantingSite (
+    SiteID          INT           NOT NULL AUTO_INCREMENT,
+    Name            VARCHAR(100)  NOT NULL,
+    Latitude        DECIMAL(9,6)  NOT NULL,
+    Longitude       DECIMAL(9,6)  NOT NULL,
+    CanopyCoverPct  DECIMAL(4,1)  NOT NULL,
+    ImperviousPct   DECIMAL(4,1)  NOT NULL,
+    SurfaceTempF    DECIMAL(4,1)  NOT NULL,
+    TreesNeeded     SMALLINT      NOT NULL,
+    Status          VARCHAR(20)   NOT NULL DEFAULT 'Proposed',
+    SubmittedBy     INT           NULL,
+    SubmittedDate   DATE          NOT NULL,
+    CONSTRAINT PK_PlantingSite PRIMARY KEY (SiteID),
+    CONSTRAINT UQ_PlantingSite_Name UNIQUE (Name),
+    CONSTRAINT FK_Site_User FOREIGN KEY (SubmittedBy)
+        REFERENCES Users(UserID) ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT CK_Site_Latitude  CHECK (Latitude  BETWEEN -90  AND 90),
+    CONSTRAINT CK_Site_Longitude CHECK (Longitude BETWEEN -180 AND 180),
+    CONSTRAINT CK_Site_Canopy     CHECK (CanopyCoverPct BETWEEN 0 AND 100),
+    CONSTRAINT CK_Site_Impervious CHECK (ImperviousPct  BETWEEN 0 AND 100),
+    CONSTRAINT CK_Site_Trees      CHECK (TreesNeeded > 0),
+    CONSTRAINT CK_Site_Status CHECK (Status IN ('Proposed','Approved','Planted'))
+);
+
+-- ---------------------------------------------------------------------
+-- 10. SiteRecommendation  (associative entity: PlantingSite M:N TreeSpecies)
+-- ---------------------------------------------------------------------
+CREATE TABLE SiteRecommendation (
+    SiteID     INT       NOT NULL,
+    SpeciesID  INT       NOT NULL,
+    Quantity   SMALLINT  NOT NULL DEFAULT 1,
+    CONSTRAINT PK_SiteRecommendation PRIMARY KEY (SiteID, SpeciesID),
+    CONSTRAINT FK_Rec_Site FOREIGN KEY (SiteID)
+        REFERENCES PlantingSite(SiteID) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT FK_Rec_Species FOREIGN KEY (SpeciesID)
+        REFERENCES TreeSpecies(SpeciesID) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT CK_Rec_Quantity CHECK (Quantity > 0)
+);
+
+-- PlantingSite 1 --Hosts-- M VolunteerOpportunity (optional)
+ALTER TABLE VolunteerOpportunity
+    ADD COLUMN SiteID INT NULL,
+    ADD CONSTRAINT FK_Opportunity_Site FOREIGN KEY (SiteID)
+        REFERENCES PlantingSite(SiteID) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- NeedScore (0-100) is derived, so it lives in a view instead of a column:
+-- 50% missing canopy, 30% paved surface, 20% summer surface heat above 85F.
+CREATE VIEW SitePriority AS
+SELECT s.*,
+       ROUND(0.5 * (100 - s.CanopyCoverPct)
+           + 0.3 * s.ImperviousPct
+           + 0.2 * LEAST(100, GREATEST(0, (s.SurfaceTempF - 85) * 4))) AS NeedScore
+FROM PlantingSite s;
+
+-- TreeSpecies (12) — native to southwest Virginia
+INSERT INTO TreeSpecies (CommonName, ScientificName, MatureHeightFt, Category) VALUES
+('Red Maple',         'Acer rubrum',             50, 'Shade'),
+('White Oak',         'Quercus alba',            80, 'Shade'),
+('Willow Oak',        'Quercus phellos',         60, 'Shade'),
+('Eastern Redbud',    'Cercis canadensis',       25, 'Ornamental'),
+('Flowering Dogwood', 'Cornus florida',          25, 'Ornamental'),
+('American Sycamore', 'Platanus occidentalis',   90, 'Riparian'),
+('River Birch',       'Betula nigra',            50, 'Riparian'),
+('Tulip Poplar',      'Liriodendron tulipifera', 90, 'Shade'),
+('Black Gum',         'Nyssa sylvatica',         50, 'Shade'),
+('Serviceberry',      'Amelanchier arborea',     20, 'Ornamental'),
+('Swamp White Oak',   'Quercus bicolor',         60, 'Riparian'),
+('Eastern Red Cedar', 'Juniperus virginiana',    40, 'Evergreen');
+
+-- PlantingSite (18) — sample sites around Blacksburg, VA (approximate locations)
+INSERT INTO PlantingSite (Name, Latitude, Longitude, CanopyCoverPct, ImperviousPct, SurfaceTempF, TreesNeeded, Status, SubmittedBy, SubmittedDate) VALUES
+('Downtown Main Street Corridor',  37.229600, -80.414200,  9.0, 88.0, 104.0, 30, 'Approved',  1, '2026-02-10'),
+('North Main Retail Strip',        37.244500, -80.422000,  6.0, 92.0, 106.0, 40, 'Proposed',  4, '2026-03-02'),
+('University City Blvd Lots',      37.239000, -80.427000,  7.0, 90.0, 105.0, 35, 'Proposed',  7, '2026-03-15'),
+('Prices Fork Road Corridor',      37.233000, -80.434000, 14.0, 70.0, 101.0, 25, 'Approved',  2, '2026-01-22'),
+('South Main Industrial Park',     37.205000, -80.406000,  5.0, 94.0, 108.0, 50, 'Proposed', 11, '2026-04-05'),
+('Huckleberry Trail South',        37.212000, -80.413000, 32.0, 20.0,  92.0, 15, 'Approved',  3, '2026-02-28'),
+('Municipal Park Edge',            37.220000, -80.423000, 41.0, 15.0,  90.0, 10, 'Planted',   1, '2025-10-04'),
+('Heritage Park Meadow',           37.244000, -80.458000, 22.0,  8.0,  94.0, 60, 'Approved',  5, '2026-05-12'),
+('Hethwood Neighborhood Streets',  37.224000, -80.451000, 28.0, 45.0,  96.0, 20, 'Planted',   8, '2025-09-18'),
+('Patrick Henry Drive',            37.238000, -80.418000, 18.0, 60.0,  99.0, 18, 'Proposed', 12, '2026-06-01'),
+('Toms Creek Road Medians',        37.247000, -80.438000, 20.0, 55.0,  98.0, 22, 'Proposed', 15, '2026-06-20'),
+('Stroubles Creek Buffer',         37.216000, -80.438000, 25.0, 12.0,  91.0, 45, 'Approved',  2, '2026-03-08'),
+('Downtown Surface Parking',       37.228500, -80.415500,  3.0, 97.0, 110.0, 12, 'Proposed', 20, '2026-07-14'),
+('Gilbert Linkous School Grounds', 37.237000, -80.410000, 19.0, 50.0,  97.0, 16, 'Approved', 22, '2026-04-18'),
+('Westside Residential Streets',   37.227500, -80.430000, 35.0, 40.0,  93.0, 14, 'Planted',  10, '2025-11-02'),
+('Nellies Cave Park',              37.228000, -80.392000, 38.0, 10.0,  89.0,  8, 'Planted',  14, '2025-10-20'),
+('Givens Lane Greenway',           37.256000, -80.425000, 26.0, 18.0,  93.0, 30, 'Proposed', 25, '2026-08-09'),
+('Owens Street Neighborhood',      37.235000, -80.407000, 16.0, 58.0, 100.0, 20, 'Proposed', 28, '2026-09-03');
+
+-- SiteRecommendation (36)
+INSERT INTO SiteRecommendation (SiteID, SpeciesID, Quantity) VALUES
+(1, 3, 15), (1, 4, 10), (1, 9, 5),
+(2, 3, 20), (2, 1, 20),
+(3, 1, 15), (3, 9, 10), (3, 10, 10),
+(4, 2, 10), (4, 3, 15),
+(5, 1, 20), (5, 12, 15), (5, 3, 15),
+(6, 5, 8),  (6, 10, 7),
+(7, 2, 5),  (7, 8, 5),
+(8, 2, 20), (8, 8, 25), (8, 12, 15),
+(9, 1, 10), (9, 4, 10),
+(10, 3, 10), (10, 5, 8),
+(11, 9, 12), (11, 4, 10),
+(12, 6, 15), (12, 7, 15), (12, 11, 15),
+(13, 3, 12),
+(14, 2, 8), (14, 5, 8),
+(15, 1, 14),
+(16, 8, 8),
+(17, 7, 15), (17, 11, 15);
+
+-- Tie tree-related volunteer events to the sites they serve
+UPDATE VolunteerOpportunity SET SiteID = 9  WHERE OpportunityID = 1;
+UPDATE VolunteerOpportunity SET SiteID = 12 WHERE OpportunityID IN (2, 24);
+UPDATE VolunteerOpportunity SET SiteID = 1  WHERE OpportunityID = 9;
+UPDATE VolunteerOpportunity SET SiteID = 18 WHERE OpportunityID = 12;
+UPDATE VolunteerOpportunity SET SiteID = 8  WHERE OpportunityID = 16;
+UPDATE VolunteerOpportunity SET SiteID = 14 WHERE OpportunityID = 22;
+UPDATE VolunteerOpportunity SET SiteID = 13 WHERE OpportunityID = 25;
+
+-- =====================================================================
 --  VERIFICATION QUERIES (screenshot these results for your submission)
 -- =====================================================================
 
@@ -303,7 +446,10 @@ UNION ALL SELECT 'Role',                 COUNT(*) FROM Role
 UNION ALL SELECT 'UserRole',             COUNT(*) FROM UserRole
 UNION ALL SELECT 'VolunteerOpportunity', COUNT(*) FROM VolunteerOpportunity
 UNION ALL SELECT 'OrganizationMember',   COUNT(*) FROM OrganizationMember
-UNION ALL SELECT 'Registration',         COUNT(*) FROM Registration;
+UNION ALL SELECT 'Registration',         COUNT(*) FROM Registration
+UNION ALL SELECT 'TreeSpecies',          COUNT(*) FROM TreeSpecies
+UNION ALL SELECT 'PlantingSite',         COUNT(*) FROM PlantingSite
+UNION ALL SELECT 'SiteRecommendation',   COUNT(*) FROM SiteRecommendation;
 
 -- Total volunteer hours per user (joins across 2 tables)
 SELECT u.UserID, CONCAT(u.FName, ' ', u.LName) AS Volunteer,
@@ -329,3 +475,14 @@ FROM Users u
 JOIN UserRole ur ON ur.UserID = u.UserID
 JOIN Role ro     ON ro.RoleID = ur.RoleID
 GROUP BY u.UserID, u.FName, u.LName;
+
+-- Planting sites ranked by need, with submitter and recommended trees
+SELECT p.SiteID, p.Name, p.NeedScore, p.Status,
+       CONCAT(u.FName, ' ', u.LName) AS SubmittedBy,
+       GROUP_CONCAT(CONCAT(sr.Quantity, ' ', t.CommonName) SEPARATOR ', ') AS Recommended
+FROM SitePriority p
+LEFT JOIN Users u               ON u.UserID = p.SubmittedBy
+LEFT JOIN SiteRecommendation sr ON sr.SiteID = p.SiteID
+LEFT JOIN TreeSpecies t         ON t.SpeciesID = sr.SpeciesID
+GROUP BY p.SiteID, p.Name, p.NeedScore, p.Status, u.FName, u.LName
+ORDER BY p.NeedScore DESC;

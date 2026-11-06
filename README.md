@@ -1,6 +1,9 @@
 # Treefinder — Phase 2 MySQL Project
 
-This is a small local web app for the Phase 2 database requirements. It displays sample data and supports inserts and permanent deletes for the five major tables.
+This is a small local web app for the Phase 2 database requirements. It has two parts:
+
+- **Planting Map** (the home page) shows where Blacksburg needs more trees. Each `PlantingSite` is ranked by a need score from the `SitePriority` view, which combines missing tree canopy, paved surface, and summer surface heat. Users can click the map to propose a site (insert), move a site from Proposed → Approved → Planted (update), and see recommended species and linked volunteer events (joins).
+- **Database Manager** displays sample data and supports inserts and permanent deletes for the major tables.
 
 ## Start the project
 
@@ -14,7 +17,9 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-The MySQL container runs `sqlproject/volunteer_db.sql` automatically the first time it starts. The script creates the `volunteer_db` database, seven tables, constraints, and all sample data.
+The MySQL container runs `sqlproject/volunteer_db.sql` automatically the first time it starts. The script creates the `volunteer_db` database, ten tables, the `SitePriority` view, constraints, and all sample data.
+
+If your database was created before the planting map was added, run `npm run db:reset` once to load the new tables.
 
 ## Useful commands
 
@@ -36,5 +41,8 @@ npm run dev        # start the web app
 | VolunteerOpportunity | 25 |
 | OrganizationMember | 30 |
 | Registration | 40 |
+| PlantingSite | 18 |
+| TreeSpecies | 12 |
+| SiteRecommendation | 36 |
 
 The connection settings are in `.env.local`. Example values are provided in `.env.example`.

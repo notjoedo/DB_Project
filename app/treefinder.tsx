@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PlantingMap from "./planting-map";
 
-type TableName = "Organization" | "Users" | "VolunteerOpportunity" | "OrganizationMember" | "Registration";
+type TableName = "Organization" | "Users" | "VolunteerOpportunity" | "OrganizationMember" | "Registration" | "PlantingSite";
 type Row = Record<string, string | number | null>;
 type Snapshot = {
   counts: { TableName: string; RowCount: number }[];
@@ -35,11 +36,15 @@ const tables: Record<TableName, { label: string; singular: string; id: string; c
     label: "Registrations", singular: "registration", id: "RegistrationID",
     columns: [{ key: "RegistrationID", label: "ID" }, { key: "Volunteer", label: "Volunteer" }, { key: "Opportunity", label: "Opportunity" }, { key: "RegistrationDate", label: "Registered" }, { key: "Status", label: "Status" }, { key: "HoursLogged", label: "Hours" }],
   },
+  PlantingSite: {
+    label: "Planting Sites", singular: "site", id: "SiteID",
+    columns: [{ key: "SiteID", label: "ID" }, { key: "Name", label: "Name" }, { key: "Latitude", label: "Lat" }, { key: "Longitude", label: "Lng" }, { key: "CanopyCoverPct", label: "Canopy %" }, { key: "NeedScore", label: "Need" }, { key: "Status", label: "Status" }, { key: "SubmittedBy", label: "Submitted by" }],
+  },
 };
 
 const emptySnapshot: Snapshot = {
   counts: [],
-  tables: { Organization: [], Users: [], VolunteerOpportunity: [], OrganizationMember: [], Registration: [] },
+  tables: { Organization: [], Users: [], VolunteerOpportunity: [], OrganizationMember: [], Registration: [], PlantingSite: [] },
   lookups: { organizations: [], users: [], opportunities: [] },
 };
 const ROW_HEIGHT = 41;
@@ -54,6 +59,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 export default function Treefinder() {
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
+  const [view, setView] = useState<"map" | "database">("map");
   const [table, setTable] = useState<TableName>("Organization");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
@@ -94,7 +100,7 @@ export default function Treefinder() {
     const observer = new ResizeObserver(fit);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [loading]);
+  }, [loading, view]);
 
   const rows = snapshot.tables[table];
   const filteredRows = useMemo(() => {
@@ -148,9 +154,11 @@ export default function Treefinder() {
     <main className="page">
       <header className="topbar">
         <div><img className="brand-logo" src="/logo.png" alt="Three Trees Tree Conservation" /></div>
-        <nav className="nav-tabs" aria-label="Tables">
+        <nav className="nav-tabs" aria-label="Views">
+          <button className={view === "map" ? "active" : ""} onClick={() => setView("map")}>Planting Map</button>
+          <span className="nav-divider" aria-hidden="true" />
           {(Object.keys(tables) as TableName[]).map((name) => (
-            <button key={name} className={table === name ? "active" : ""} onClick={() => { setTable(name); setQuery(""); setPage(0); setMessage(""); }}>
+            <button key={name} className={view === "database" && table === name ? "active" : ""} onClick={() => { setView("database"); setTable(name); setQuery(""); setPage(0); setMessage(""); }}>
               {tables[name].label}<strong>{snapshot.tables[name].length}</strong>
             </button>
           ))}
@@ -158,10 +166,19 @@ export default function Treefinder() {
         <div className="account"><span>Local MySQL</span></div>
       </header>
 
+      {view === "map" ? (
+      <section className="content">
+        <div className="title-row">
+          <h1>Planting Map</h1>
+          <span className="subtitle">Blacksburg, VA · sites ranked by canopy gap, paved surface, and heat</span>
+        </div>
+        <PlantingMap onChange={load} />
+      </section>
+      ) : (
       <section className="content">
         <div className="title-row">
           <h1>Database Manager</h1>
-          <button className="primary-button" onClick={() => setAdding(true)}>+ Add {tables[table].singular}</button>
+          <button className="primary-button" onClick={() => table === "PlantingSite" ? setView("map") : setAdding(true)}>+ Add {tables[table].singular}</button>
         </div>
 
         {message && <p className="notice">{message}</p>}
@@ -207,6 +224,7 @@ export default function Treefinder() {
           )}
         </section>
       </section>
+      )}
 
       {adding && <RecordForm table={table} snapshot={snapshot} saving={saving} onClose={() => setAdding(false)} onSave={insert} />}
       {deleteTarget && (
