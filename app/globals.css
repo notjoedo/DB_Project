@@ -36,9 +36,9 @@ h1 { margin: 0; font-size: 26px; letter-spacing: -.2px; }
 .table-toolbar > div { display: flex; align-items: baseline; gap: 10px; }
 .table-toolbar h2 { margin: 0; font-size: 18px; }
 .table-toolbar span { color: var(--muted); font-size: 12px; }
-input, select { width: 100%; border: 1px solid var(--border); background: white; border-radius: 3px; padding: 7px 9px; color: var(--text); }
+input, select, textarea { width: 100%; border: 1px solid var(--border); background: white; border-radius: 3px; padding: 7px 9px; color: var(--text); }
 .table-toolbar input { width: 220px; padding: 5px 9px; background: transparent; }
-input:focus, select:focus { outline: 0; border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
+input:focus, select:focus, textarea:focus { outline: 0; border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
 .table-wrap { flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; border-bottom: 1px solid var(--border); }
@@ -65,6 +65,11 @@ tbody tr:hover { background: #efece2; }
 .record-form { display: grid; gap: 12px; }
 .record-form label { display: grid; gap: 4px; }
 .record-form label span { font-size: 12px; color: var(--muted); }
+/* Red asterisk on every required field's label */
+.record-form label:has(:required) > span::after { content: " *"; color: var(--danger); font-weight: 600; }
+textarea { font: inherit; resize: vertical; min-height: 64px; }
+.char-count { justify-self: end; color: var(--muted); font-size: 11px; }
+.event-notes { white-space: pre-line; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .modal-actions button { background: transparent; color: var(--text); border-color: var(--border); }
 .modal-actions .primary-button { background: var(--green); color: white; border-color: transparent; }

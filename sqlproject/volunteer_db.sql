@@ -358,12 +358,14 @@ CREATE TABLE SiteRecommendation (
 );
 
 -- Map location for each event, the planting area it serves (optional),
--- and the coordinator who scheduled it (Users 1 --Schedules-- M Opportunity)
+-- the coordinator who scheduled it (Users 1 --Schedules-- M Opportunity),
+-- and optional directions or comments for volunteers
 ALTER TABLE VolunteerOpportunity
     ADD COLUMN SiteID     INT           NULL,
     ADD COLUMN Latitude   DECIMAL(9,6)  NULL,
     ADD COLUMN Longitude  DECIMAL(9,6)  NULL,
     ADD COLUMN CreatedBy  INT           NULL,
+    ADD COLUMN Notes      VARCHAR(500)  NULL,   -- directions or comments for volunteers
     ADD CONSTRAINT FK_Opportunity_Site FOREIGN KEY (SiteID)
         REFERENCES PlantingSite(SiteID) ON DELETE SET NULL ON UPDATE CASCADE,
     ADD CONSTRAINT FK_Opportunity_Creator FOREIGN KEY (CreatedBy)

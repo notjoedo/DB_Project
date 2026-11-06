@@ -3,13 +3,31 @@ import { database } from "./server";
 
 export const SCHEDULER_ROLES = ["Coordinator", "Officer", "Director"];
 
+interface OrgRow extends RowDataPacket { OrgID: number; Organization: string; Reason: string }
+
+/**
+ * Organizations a user may schedule events for:
+ *   Admin role      → every organization
+ *   Organizer role  → any organization they belong to
+ *   otherwise       → organizations where they are a Coordinator, Officer, or Director
+ */
+export async function schedulableOrgs(user: { UserID: number; roles: string[] }) {
+  const admin = user.roles.includes("Admin"), organizer = user.roles.includes("Organizer");
+  const [rows] = await database().query<OrgRow[]>(`SELECT o.OrgID, o.Name AS Organization,
+      COALESCE(m.OrgRole, 'Admin') AS Reason
+    FROM Organization o LEFT JOIN OrganizationMember m ON m.OrgID=o.OrgID AND m.UserID=?
+    WHERE ? OR m.OrgRole IN (?) OR (? AND m.UserID IS NOT NULL)
+    ORDER BY o.Name`, [user.UserID, admin, SCHEDULER_ROLES, organizer]);
+  return rows.map(({ OrgID, Organization, Reason }) => ({ OrgID, Organization, Reason }));
+}
+
 interface SiteRow extends RowDataPacket {
   SiteID: number; Name: string; Latitude: number; Longitude: number; CanopyCoverPct: number; ImperviousPct: number;
   SurfaceTempF: number; TreesNeeded: number; Status: string; SubmittedDate: string; SubmittedBy: string | null; NeedScore: number;
 }
 interface RecommendationRow extends RowDataPacket { SiteID: number; SpeciesID: number; CommonName: string; Quantity: number }
 interface EventRow extends RowDataPacket {
-  OpportunityID: number; Title: string; EventDate: string; Location: string; Latitude: number; Longitude: number; Upcoming: number;
+  OpportunityID: number; Title: string; EventDate: string; Location: string; Notes: string | null; Latitude: number; Longitude: number; Upcoming: number;
   OrgID: number; Organization: string; SiteID: number | null; SiteName: string | null; CreatedBy: string | null; SignUps: number;
 }
 interface VolunteerRow extends RowDataPacket { OpportunityID: number; RegistrationID: number; UserID: number; Name: string; Status: string }
@@ -27,7 +45,7 @@ export async function mapSnapshot() {
     db.query<RecommendationRow[]>(`SELECT sr.SiteID, sr.SpeciesID, t.CommonName, sr.Quantity
       FROM SiteRecommendation sr JOIN TreeSpecies t ON t.SpeciesID=sr.SpeciesID
       ORDER BY sr.SiteID, sr.Quantity DESC`),
-    db.query<EventRow[]>(`SELECT v.OpportunityID, v.Title, DATE_FORMAT(v.EventDate, '%Y-%m-%d') AS EventDate, v.Location,
+    db.query<EventRow[]>(`SELECT v.OpportunityID, v.Title, DATE_FORMAT(v.EventDate, '%Y-%m-%d') AS EventDate, v.Location, v.Notes,
       v.Latitude, v.Longitude, v.EventDate >= CURDATE() AS Upcoming, v.OrgID, o.Name AS Organization,
       v.SiteID, p.Name AS SiteName, CONCAT(c.FName, ' ', c.LName) AS CreatedBy,
       COUNT(CASE WHEN r.Status <> 'Cancelled' THEN 1 END) AS SignUps
@@ -36,7 +54,7 @@ export async function mapSnapshot() {
       LEFT JOIN Users c ON c.UserID=v.CreatedBy
       LEFT JOIN Registration r ON r.OpportunityID=v.OpportunityID
       WHERE v.Latitude IS NOT NULL
-      GROUP BY v.OpportunityID, v.Title, v.EventDate, v.Location, v.Latitude, v.Longitude, v.OrgID, o.Name, v.SiteID, p.Name, c.FName, c.LName
+      GROUP BY v.OpportunityID, v.Title, v.EventDate, v.Location, v.Notes, v.Latitude, v.Longitude, v.OrgID, o.Name, v.SiteID, p.Name, c.FName, c.LName
       ORDER BY v.EventDate, v.OpportunityID`),
     db.query<VolunteerRow[]>(`SELECT r.OpportunityID, r.RegistrationID, r.UserID, CONCAT(u.FName, ' ', u.LName) AS Name, r.Status
       FROM Registration r JOIN Users u ON u.UserID=r.UserID

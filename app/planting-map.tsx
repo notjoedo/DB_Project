@@ -14,26 +14,26 @@ type Site = {
 };
 type Volunteer = { RegistrationID: number; UserID: number; Name: string; Status: string };
 type VolunteerEvent = {
-  OpportunityID: number; Title: string; EventDate: string; Location: string; Latitude: number; Longitude: number; Upcoming: boolean;
+  OpportunityID: number; Title: string; EventDate: string; Location: string; Notes: string | null; Latitude: number; Longitude: number; Upcoming: boolean;
   OrgID: number; Organization: string; SiteID: number | null; SiteName: string | null; CreatedBy: string | null; SignUps: number;
   volunteers: Volunteer[];
 };
 type MapData = { sites: Site[]; events: VolunteerEvent[] };
-type Membership = { OrgID: number; Organization: string; OrgRole: string };
+/** An organization the user may schedule for, and why (their org role, or "Admin"). */
+type SchedulableOrg = { OrgID: number; Organization: string; Reason: string };
 type Match = { Kind: "event" | "site"; ID: number; Field: string; Value: string };
 type Selection = { kind: "event" | "site"; id: number } | null;
 type Point = { lat: number; lng: number };
 type CanopyReading = { canopy: number | null; landCover: string | null; developed: boolean; error?: string };
-type Draft = { OrgID: string; Title: string; EventDate: string; Location: string };
+type Draft = { OrgID: string; Title: string; EventDate: string; Location: string; Notes: string };
 
 const CENTER: [number, number] = [37.2296, -80.4139];
 const STATUSES: Status[] = ["Proposed", "Approved", "Planted"];
 const EVENT_FILTERS = ["Upcoming", "Past", "All"] as const;
 const SITE_RADIUS_METERS = 300;
 const NEED_COLORS = { high: "#b8432f", medium: "#d98a2b", low: "#9a9440", planted: "#2f6b3d" };
-const SCHEDULER_ROLES = ["Coordinator", "Officer", "Director"];
 const emptyData: MapData = { sites: [], events: [] };
-const emptyDraft: Draft = { OrgID: "", Title: "Tree planting", EventDate: "", Location: "" };
+const emptyDraft: Draft = { OrgID: "", Title: "Tree planting", EventDate: "", Location: "", Notes: "" };
 
 function needLevel(site: Pick<Site, "Status" | "NeedScore">) {
   if (site.Status === "Planted") return "planted";
@@ -52,7 +52,9 @@ function metersBetween(a: Point, b: Point) {
 
 export default function PlantingMap({ onChange }: { onChange?: () => void }) {
   const { user, hasRole, promptLogin } = useAuth();
-  const [myOrgs, setMyOrgs] = useState<Membership[] | null>(null);
+  const [myOrgs, setMyOrgs] = useState<SchedulableOrg[] | null>(null);
+  const [addresses, setAddresses] = useState<Record<string, string | null>>({});
+  const autoLocation = useRef("");
   const [data, setData] = useState<MapData>(emptyData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -194,6 +196,34 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
   }, [readingKey, readings]);
   const reading = readingKey ? readings[readingKey] ?? null : null;
 
+  // Fill the meeting spot with the street address of the clicked point, unless the user typed their own.
+  const addressKey = activePoint ? pointKey(activePoint) : null;
+  useEffect(() => {
+    if (!addressKey) return;
+    if (addressKey in addresses) {
+      const address = addresses[addressKey];
+      if (!address) return;
+      setDraft((current) => {
+        if (current.Location && current.Location !== autoLocation.current) return current;
+        autoLocation.current = address;
+        return { ...current, Location: address };
+      });
+      return;
+    }
+    const [lat, lng] = addressKey.split(",");
+    const controller = new AbortController();
+    fetch(`/api/geocode?lat=${lat}&lng=${lng}`, { signal: controller.signal })
+      .then(async (response) => {
+        const result = (await response.json()) as { address?: string | null };
+        setAddresses((current) => ({ ...current, [addressKey]: response.ok ? result.address ?? null : null }));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setAddresses((current) => ({ ...current, [addressKey]: null }));
+      });
+    return () => controller.abort();
+  }, [addressKey, addresses]);
+  const lookingUpAddress = Boolean(addressKey && !(addressKey in addresses));
+
   const matchesFor = (kind: "event" | "site", id: number) => matches?.get(`${kind}:${id}`);
   const visibleEvents = useMemo(() => data.events.filter((event) =>
     (eventFilter === "All" || event.Upcoming === (eventFilter === "Upcoming")) && (!matches || matches.has(`event:${event.OpportunityID}`))),
@@ -292,8 +322,8 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
     setMyOrgs(null);
     apiFetch("/api/auth/me")
       .then(async (response) => {
-        const result = (await response.json()) as { memberships?: Membership[] };
-        const orgs = (result.memberships ?? []).filter((m) => SCHEDULER_ROLES.includes(m.OrgRole));
+        const result = (await response.json()) as { canSchedule?: SchedulableOrg[] };
+        const orgs = result.canSchedule ?? [];
         setMyOrgs(orgs);
         if (orgs.length === 1) setDraft((current) => ({ ...current, OrgID: String(orgs[0].OrgID) }));
       })
@@ -302,7 +332,8 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
     setSelection(null);
     setMessage("");
     setPoint(at ? { lat: at.Latitude, lng: at.Longitude } : null);
-    setDraft({ ...emptyDraft, EventDate: today(), Location: at?.Name ?? "" });
+    autoLocation.current = at?.Name ?? "";
+    setDraft({ ...emptyDraft, EventDate: today(), Location: autoLocation.current });
   }
 
   // Leave scheduling mode if the user logs out mid-way.
@@ -355,7 +386,7 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
         {error && <div className="error"><span>{error}</span><button onClick={load}>Try again</button></div>}
 
         {scheduling ? (
-          <ScheduleForm orgs={myOrgs} draft={draft} setDraft={setDraft} point={point} reading={reading} nearestSite={nearestSite}
+          <ScheduleForm orgs={myOrgs} draft={draft} setDraft={setDraft} point={point} reading={reading} nearestSite={nearestSite} lookingUpAddress={lookingUpAddress}
             saving={saving} onCancel={stopScheduling} onSubmit={saveEvent} />
         ) : selectedEvent ? (
           <EventDetail event={selectedEvent} userId={user?.UserID ?? null} reading={reading} saving={saving}
@@ -463,8 +494,8 @@ function CanopyNote({ reading }: { reading: CanopyReading | null }) {
   );
 }
 
-function ScheduleForm({ orgs, draft, setDraft, point, reading, nearestSite, saving, onCancel, onSubmit }: {
-  orgs: Membership[] | null; draft: Draft; setDraft: React.Dispatch<React.SetStateAction<Draft>>; point: Point | null; reading: CanopyReading | null;
+function ScheduleForm({ orgs, draft, setDraft, point, reading, nearestSite, lookingUpAddress, saving, onCancel, onSubmit }: {
+  orgs: SchedulableOrg[] | null; draft: Draft; lookingUpAddress: boolean; setDraft: React.Dispatch<React.SetStateAction<Draft>>; point: Point | null; reading: CanopyReading | null;
   nearestSite: Site | null; saving: boolean; onCancel: () => void; onSubmit: (event: React.FormEvent) => void;
 }) {
   const set = (name: keyof Draft, value: string) => setDraft((current) => ({ ...current, [name]: value }));
@@ -478,18 +509,24 @@ function ScheduleForm({ orgs, draft, setDraft, point, reading, nearestSite, savi
       {point && <CanopyNote reading={reading} />}
       {point && nearestSite && <p className="site-meta">Inside planting area <strong>{nearestSite.Name}</strong> (need {nearestSite.NeedScore}). The event will be linked to it.</p>}
       {orgs === null ? <p className="state">Checking your organizations...</p> : !orgs.length ? (
-        <p className="error">You need to be a Coordinator, Officer, or Director of an organization to schedule its events. Ask an organization admin to update your role.</p>
+        <p className="error">You can&apos;t schedule events for any organization yet. You need the Admin role, the Organizer role plus membership in an organization, or to be an organization&apos;s Coordinator, Officer, or Director.</p>
       ) : (
         <label><span>Organization</span><select required value={draft.OrgID} onChange={(e) => set("OrgID", e.target.value)}>
-          <option value="">Choose one of your organizations</option>
-          {orgs.map((org) => <option key={org.OrgID} value={org.OrgID}>{org.Organization} ({org.OrgRole})</option>)}
+          <option value="">Choose an organization</option>
+          {orgs.map((org) => <option key={org.OrgID} value={org.OrgID}>{org.Organization} ({org.Reason})</option>)}
         </select></label>
       )}
-      <label><span>Event title</span><input required maxLength={150} value={draft.Title} onChange={(e) => set("Title", e.target.value)} /></label>
       <div className="field-pair">
+        <label><span>Event title</span><input required maxLength={150} value={draft.Title} onChange={(e) => set("Title", e.target.value)} /></label>
         <label><span>Date</span><input required type="date" min={today()} value={draft.EventDate} onChange={(e) => set("EventDate", e.target.value)} /></label>
-        <label><span>Meeting spot</span><input required maxLength={150} value={draft.Location} onChange={(e) => set("Location", e.target.value)} placeholder="e.g. Corner of Main & Roanoke" /></label>
       </div>
+      <label><span>Meeting spot</span><input required maxLength={150} value={draft.Location} onChange={(e) => set("Location", e.target.value)}
+        placeholder={lookingUpAddress ? "Looking up the address..." : point ? "e.g. Corner of Main & Roanoke" : "Click the map to fill this in"} /></label>
+      <label><span>Directions or comments <small>(optional)</small></span>
+        <textarea maxLength={500} rows={3} value={draft.Notes} onChange={(e) => set("Notes", e.target.value)}
+          placeholder="e.g. Park in the Kent Square garage. Bring gloves and water; tools provided." />
+        <small className="char-count">{draft.Notes.length}/500</small>
+      </label>
       <div className="modal-actions">
         <button type="button" onClick={onCancel} disabled={saving}>Cancel</button>
         <button className="primary-button" disabled={saving || !point || !orgs?.length}>{saving ? "Saving..." : "Schedule event"}</button>
@@ -514,6 +551,7 @@ function EventDetail({ event, userId, reading, saving, onBack, onSite, onLogin, 
         <div><dt>Date</dt><dd>{formatDate(event.EventDate)}</dd></div>
         <div><dt>Organization</dt><dd>{event.Organization}</dd></div>
         <div><dt>Meeting spot</dt><dd>{event.Location}</dd></div>
+        {event.Notes && <div><dt>Directions</dt><dd className="event-notes">{event.Notes}</dd></div>}
         <div><dt>Scheduled by</dt><dd>{event.CreatedBy ?? "—"}</dd></div>
         {event.SiteID && <div><dt>Planting area</dt><dd><button className="text-link" onClick={() => onSite(event.SiteID!)}>{event.SiteName}</button></dd></div>}
       </dl>

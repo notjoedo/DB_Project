@@ -13,8 +13,7 @@
     "db:start": "docker compose up -d --wait",
     "db:stop": "docker compose down",
     "db:reset": "docker compose down -v && docker compose up -d --wait",
-    "role": "node --env-file-if-exists=.env.local scripts/roles.mjs",
-    "user:password": "node --env-file-if-exists=.env.local scripts/set-password.mjs"
+    "role": "bash scripts/role.sh"
   },
   "dependencies": {
     "jose": "^6.1.0",

@@ -31,14 +31,15 @@ Anyone can view the map. Signing up for events, scheduling events, and the profi
 
 ```sh
 cp .env.example .env.local          # once; then set AUTH_SECRET to a long random value
-./scripts/set-admin.sh you@vt.edu          # after registering in the app (--remove to undo)
-npm run role -- add you@vt.edu Admin       # same thing; also works for Organizer/Arborist
-npm run role -- list                       # who has extra roles
-npm run role -- remove you@vt.edu Admin
-npm run user:password -- olivia.bennett@mail.com   # give a sample user a password so you can log in as them
+./scripts/set-admin.sh you@vt.edu                  # after registering in the app (--remove to undo)
+./scripts/role.sh add you@vt.edu Organizer Arborist  # grant other roles
+./scripts/role.sh list                             # who has extra roles
+./scripts/role.sh remove you@vt.edu Arborist
 ```
 
-Roles are `User`, `Organizer`, `Arborist`, and `Admin` (the `Role`/`UserRole` tables). Scheduling an event also requires being a Coordinator, Officer, or Director of that organization (`OrganizationMember`). Approving or planting an area needs `Arborist` or `Admin`.
+The scripts run SQL inside the `treefinder-mysql` Docker container, so MySQL must be running (`npm run db:start`).
+
+Roles are `User`, `Organizer`, `Arborist`, and `Admin` (the `Role`/`UserRole` tables). Admins can schedule events for any organization, Organizers for any organization they belong to, and everyone else only for organizations where they are a Coordinator, Officer, or Director (`OrganizationMember`). Approving or planting an area needs `Arborist` or `Admin`.
 
 How sessions work:
 - Logging in returns a **15-minute access token** (a signed JWT). The browser keeps it in localStorage and sends it as `Authorization: Bearer ...`.

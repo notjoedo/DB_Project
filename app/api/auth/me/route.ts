@@ -1,7 +1,7 @@
 import type { RowDataPacket } from "mysql2";
 import type { NextRequest } from "next/server";
 import { REFRESH_COOKIE, loadUser, requireUser, revokeAllSessions } from "@/lib/auth";
-import { errorCode } from "@/lib/map-data";
+import { errorCode, schedulableOrgs } from "@/lib/map-data";
 import { hashPassword, passwordProblem, verifyPassword } from "@/lib/password.mjs";
 import { database } from "@/lib/server";
 
@@ -16,8 +16,8 @@ const str = (value: unknown, max: number) => typeof value === "string" ? value.t
 
 async function profile(userId: number) {
   const db = database();
-  const [user, [memberships], [registrations], [scheduled]] = await Promise.all([
-    loadUser(userId),
+  const user = await loadUser(userId);
+  const [[memberships], [registrations], [scheduled], canSchedule] = await Promise.all([
     db.query<MembershipRow[]>(`SELECT m.OrgID, o.Name AS Organization, m.OrgRole, DATE_FORMAT(m.JoinDate, '%Y-%m-%d') AS JoinDate
       FROM OrganizationMember m JOIN Organization o ON o.OrgID=m.OrgID WHERE m.UserID=? ORDER BY o.Name`, [userId]),
     db.query<RegistrationRow[]>(`SELECT r.RegistrationID, r.OpportunityID, v.Title, DATE_FORMAT(v.EventDate, '%Y-%m-%d') AS EventDate,
@@ -28,12 +28,14 @@ async function profile(userId: number) {
       COUNT(CASE WHEN r.Status <> 'Cancelled' THEN 1 END) AS SignUps
       FROM VolunteerOpportunity v JOIN Organization o ON o.OrgID=v.OrgID LEFT JOIN Registration r ON r.OpportunityID=v.OpportunityID
       WHERE v.CreatedBy=? GROUP BY v.OpportunityID, v.Title, v.EventDate, o.Name ORDER BY v.EventDate DESC`, [userId]),
+    user ? schedulableOrgs(user) : [],
   ]);
   return {
     user,
     memberships: [...memberships],
     registrations: registrations.map((row) => ({ ...row, Upcoming: Boolean(row.Upcoming) })),
     scheduled: scheduled.map((row) => ({ ...row, SignUps: Number(row.SignUps) })),
+    canSchedule,
   };
 }
 

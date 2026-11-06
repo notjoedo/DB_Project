@@ -6,8 +6,6 @@
 # Takes effect on the user's next page load; no need to log out.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-
 action=add
 if [[ "${1:-}" == "--remove" ]]; then
   action=remove
@@ -19,9 +17,4 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "Error: Node.js is required (it's already needed to run the app)." >&2
-  exit 1
-fi
-
-exec node --env-file-if-exists=.env.local scripts/roles.mjs "$action" "$1" Admin
+exec "$(dirname "$0")/role.sh" "$action" "$1" Admin
