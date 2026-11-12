@@ -41,6 +41,9 @@ The scripts run SQL inside the `treefinder-mysql` Docker container, so MySQL mus
 
 Roles are `User`, `Organizer`, `Arborist`, and `Admin` (the `Role`/`UserRole` tables). Admins can schedule events for any organization, Organizers for any organization they belong to, and everyone else only for organizations where they are a Coordinator, Officer, or Director (`OrganizationMember`). Approving or planting an area needs `Arborist` or `Admin`.
 
+- **Users page (Database Manager):** admins can grant or remove `Organizer` and `Arborist` from each user's Roles cell. `Admin` can only be granted or removed with the scripts above (and admin accounts can't be deleted from the UI); `User` is permanent.
+- **Volunteer Requests page:** new sign-ups start as `Pending`. Anyone who can schedule events for an organization sees a *Volunteer Requests* tab listing pending sign-ups for that organization's upcoming events, and can accept (→ `Confirmed`) or decline (→ `Cancelled`) them.
+
 How sessions work:
 - Logging in returns a **15-minute access token** (a signed JWT). The browser keeps it in localStorage and sends it as `Authorization: Bearer ...`.
 - A **7-day refresh token** is set as an httpOnly, SameSite=Strict cookie that page scripts can't read. The database stores only its SHA-256 hash (`RefreshToken` table).

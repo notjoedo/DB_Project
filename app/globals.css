@@ -199,3 +199,8 @@ textarea { font: inherit; resize: vertical; min-height: 64px; }
   .map-legend { flex-wrap: wrap; right: 10px; }
   .profile-grid { grid-template-columns: 1fr; }
 }
+.role-editor { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 4px; }
+.role-editor .role-tag { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.role-editor .role-tag button { border: 0; background: transparent; color: inherit; padding: 0 0 0 2px; font-size: 13px; line-height: 1; cursor: pointer; }
+.role-editor .role-tag button:hover { color: var(--danger); }
+.role-editor select { font-size: 11px; padding: 1px 4px; border: 1px dashed var(--border); border-radius: 10px; background: transparent; color: var(--muted); }

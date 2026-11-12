@@ -5,6 +5,7 @@ import { AuthProvider, apiFetch, useAuth } from "./auth-client";
 import Modal from "./modal";
 import PlantingMap from "./planting-map";
 import ProfilePage from "./profile";
+import RequestsPage, { type VolunteerRequest } from "./requests";
 
 type TableName = "Organization" | "Users" | "VolunteerOpportunity" | "OrganizationMember" | "Registration" | "PlantingSite";
 type Row = Record<string, string | number | null>;
@@ -50,6 +51,8 @@ const emptySnapshot: Snapshot = {
   tables: { Organization: [], Users: [], VolunteerOpportunity: [], OrganizationMember: [], Registration: [], PlantingSite: [] },
   lookups: { organizations: [], users: [], opportunities: [] },
 };
+// Roles admins can change from the Users page; Admin is only changed with scripts/set-admin.sh.
+const MANAGED_ROLES = ["Organizer", "Arborist"];
 const ROW_HEIGHT = 41;
 const HEADER_HEIGHT = 41;
 function pageNumbers(current: number, count: number): (number | null)[] {
@@ -68,9 +71,11 @@ function App() {
   const { user, ready, hasRole, promptLogin, logout } = useAuth();
   const isAdmin = hasRole("Admin");
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
-  const [view, setView] = useState<"map" | "database" | "profile">("map");
-  // Fall back to the map when the database or profile isn't available to this visitor.
-  const shown = (view === "database" && !isAdmin) || (view === "profile" && !user) ? "map" : view;
+  const [view, setView] = useState<"map" | "database" | "profile" | "requests">("map");
+  const [requests, setRequests] = useState<{ canManage: boolean; list: VolunteerRequest[]; error: string }>({ canManage: false, list: [], error: "" });
+  const canManage = Boolean(user) && requests.canManage;
+  // Fall back to the map when the database, profile, or requests page isn't available to this visitor.
+  const shown = (view === "database" && !isAdmin) || (view === "profile" && !user) || (view === "requests" && !canManage) ? "map" : view;
   const [table, setTable] = useState<TableName>("Organization");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
@@ -97,6 +102,24 @@ function App() {
       setLoading(false);
     }
   }, []);
+
+  // Anyone who can schedule events for an organization reviews its volunteer requests.
+  const loadRequests = useCallback(async () => {
+    try {
+      const response = await apiFetch("/api/requests");
+      const result = (await response.json()) as { canManage?: boolean; requests?: VolunteerRequest[]; error?: string };
+      if (!response.ok) throw new Error(result.error);
+      setRequests({ canManage: Boolean(result.canManage), list: result.requests ?? [], error: "" });
+    } catch (cause) {
+      setRequests((current) => ({ ...current, error: cause instanceof Error ? cause.message : "Could not load volunteer requests." }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const timer = window.setTimeout(loadRequests, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRequests, user]);
 
   // Only administrators can read the Database Manager tables.
   useEffect(() => {
@@ -141,6 +164,22 @@ function App() {
     }
   }
 
+  async function changeRole(userId: number, name: string, role: string, action: "add" | "remove") {
+    setSaving(true);
+    setMessage("");
+    try {
+      const response = await apiFetch("/api/admin-data", { method: "PATCH", body: JSON.stringify({ UserID: userId, Role: role, action }) });
+      const result = (await response.json()) as { error?: string; snapshot: Snapshot };
+      if (!response.ok) throw new Error(result.error);
+      setSnapshot(result.snapshot);
+      setMessage(action === "add" ? `Granted ${role} to ${name}.` : `Removed ${role} from ${name}.`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Role change failed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function remove() {
     if (!deleteTarget) return;
     setSaving(true);
@@ -165,6 +204,9 @@ function App() {
         <div><img className="brand-logo" src="/logo.png" alt="Three Trees Tree Conservation" /></div>
         <nav className="nav-tabs" aria-label="Views">
           <button className={shown === "map" ? "active" : ""} onClick={() => setView("map")}>Planting Map</button>
+          {canManage && <button className={shown === "requests" ? "active" : ""} onClick={() => { setView("requests"); loadRequests(); }}>
+            Volunteer Requests<strong>{requests.list.filter((r) => r.Status === "Pending").length}</strong>
+          </button>}
           {isAdmin && <>
             <span className="nav-divider" aria-hidden="true" />
             {(Object.keys(tables) as TableName[]).map((name) => (
@@ -192,13 +234,21 @@ function App() {
         <div className="title-row"><h1>My Profile</h1></div>
         <ProfilePage />
       </section>
+      ) : shown === "requests" ? (
+      <section className="content">
+        <div className="title-row">
+          <h1>Volunteer Requests</h1>
+          <span className="subtitle">Accept or decline sign-ups for your organizations&apos; upcoming events</span>
+        </div>
+        <RequestsPage requests={requests.list} error={requests.error} onChange={(list) => setRequests((current) => ({ ...current, list, error: "" }))} />
+      </section>
       ) : shown === "map" ? (
       <section className="content">
         <div className="title-row">
           <h1>Planting Map</h1>
           <span className="subtitle">Blacksburg, VA · sites ranked by canopy gap, paved surface, and heat</span>
         </div>
-        <PlantingMap onChange={isAdmin ? load : undefined} />
+        <PlantingMap onChange={isAdmin || canManage ? () => { if (isAdmin) load(); if (canManage) loadRequests(); } : undefined} />
       </section>
       ) : (
       <section className="content">
@@ -224,7 +274,10 @@ function App() {
                   {pageRows.map((row) => {
                     const id = Number(row[tables[table].id]);
                     return <tr key={id}>
-                      {tables[table].columns.map((column) => <td key={column.key}>{String(row[column.key] ?? "—")}</td>)}
+                      {tables[table].columns.map((column) => <td key={column.key}>{table === "Users" && column.key === "Roles"
+                        ? <RoleEditor roles={String(row.Roles ?? "User").split(", ")} disabled={saving}
+                            onChange={(role, action) => changeRole(id, `${row.FName} ${row.LName}`, role, action)} />
+                        : String(row[column.key] ?? "—")}</td>)}
                       <td><button className="delete-button" onClick={() => setDeleteTarget({
                         id,
                         name: String(row.Name ?? row.Title ?? row.Member ?? row.Volunteer ?? `record ${id}`),
@@ -264,6 +317,21 @@ function App() {
       )}
     </main>
   );
+}
+
+/** Role tags for a user; Organizer and Arborist can be removed or added, User and Admin are fixed here. */
+function RoleEditor({ roles, disabled, onChange }: { roles: string[]; disabled: boolean; onChange: (role: string, action: "add" | "remove") => void }) {
+  const addable = MANAGED_ROLES.filter((role) => !roles.includes(role));
+  return <span className="role-editor">
+    {roles.map((role) => <span key={role} className={`role-tag ${role.toLowerCase()}`}
+      title={role === "Admin" ? "Admin is granted and removed with scripts/set-admin.sh" : undefined}>
+      {role}
+      {MANAGED_ROLES.includes(role) && <button aria-label={`Remove ${role}`} disabled={disabled} onClick={() => onChange(role, "remove")}>×</button>}
+    </span>)}
+    {addable.length > 0 && <select aria-label="Add role" value="" disabled={disabled} onChange={(event) => event.target.value && onChange(event.target.value, "add")}>
+      <option value="">+ Role</option>{addable.map((role) => <option key={role}>{role}</option>)}
+    </select>}
+  </span>;
 }
 
 function RecordForm({ table, snapshot, saving, onClose, onSave }: {

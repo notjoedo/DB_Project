@@ -140,6 +140,44 @@ export async function POST(request: Request) {
   }
 }
 
+// Roles admins may grant or remove from the Users page. 'User' is permanent, and
+// 'Admin' is only granted or removed with scripts/set-admin.sh (or scripts/role.sh).
+const MANAGED_ROLES = ["Organizer", "Arborist"];
+
+/** Grant or remove a user's Organizer/Arborist role. Body: { UserID, Role, action: "add" | "remove" }. */
+export async function PATCH(request: Request) {
+  const { denied } = await requireUser(request, "Admin");
+  if (denied) return denied;
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const userId = int(body.UserID), role = str(body.Role, 20), action = body.action;
+  if (!Number.isFinite(userId) || (action !== "add" && action !== "remove")) {
+    return Response.json({ error: "Choose a user and whether to add or remove the role." }, { status: 400 });
+  }
+  if (!MANAGED_ROLES.includes(role)) {
+    return Response.json({
+      error: role === "Admin" ? "The Admin role can only be granted or removed with scripts/set-admin.sh."
+        : role === "User" ? "Every account keeps the base User role." : `Choose one of: ${MANAGED_ROLES.join(", ")}.`,
+    }, { status: 400 });
+  }
+  try {
+    const db = database();
+    if (action === "add") {
+      await db.execute("INSERT INTO UserRole (UserID, RoleID) SELECT ?, RoleID FROM Role WHERE RoleName=?", [userId, role]);
+    } else {
+      const [result] = await db.execute<ResultSetHeader>(
+        "DELETE ur FROM UserRole ur JOIN Role r ON r.RoleID=ur.RoleID WHERE ur.UserID=? AND r.RoleName=?", [userId, role]);
+      if (!result.affectedRows) return Response.json({ error: `This user doesn't have the ${role} role.` }, { status: 404 });
+    }
+    return Response.json({ ok: true, snapshot: await snapshot() });
+  } catch (error: unknown) {
+    const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
+    if (code === "ER_DUP_ENTRY") return Response.json({ error: `This user already has the ${role} role.` }, { status: 409 });
+    if (code === "ER_NO_REFERENCED_ROW_2") return Response.json({ error: "That user no longer exists." }, { status: 404 });
+    console.error("MySQL role change:", error);
+    return Response.json({ error: "The role could not be changed." }, { status: 503 });
+  }
+}
+
 export async function DELETE(request: Request) {
   const { denied } = await requireUser(request, "Admin");
   if (denied) return denied;
@@ -149,6 +187,12 @@ export async function DELETE(request: Request) {
     const id = int(body.id);
     if (!TABLES[table] || !Number.isFinite(id)) return Response.json({ error: "Choose a valid record." }, { status: 400 });
     const db = database();
+    // Deleting an admin's account would remove the Admin role outside the scripts.
+    if (table === "Users") {
+      const [[admin]] = await db.query<CountRow[]>(
+        "SELECT COUNT(*) AS RowCount FROM UserRole ur JOIN Role r ON r.RoleID=ur.RoleID WHERE ur.UserID=? AND r.RoleName='Admin'", [id]);
+      if (Number(admin.RowCount)) return Response.json({ error: "Admins can't be deleted here. Remove the Admin role with scripts/set-admin.sh --remove first." }, { status: 403 });
+    }
     const [result] = await db.execute<ResultSetHeader>(`DELETE FROM ${table} WHERE ${TABLES[table]}=?`, [id]);
     if (!result.affectedRows) return Response.json({ error: "Record not found." }, { status: 404 });
     return Response.json({ ok: true, snapshot: await snapshot() });
