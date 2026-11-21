@@ -11,7 +11,6 @@ type Report = {
 };
 type Group = { id: string; label: string; description: string; reports: Report[] };
 
-const CHART_LIMIT = 10;
 
 function show(value: Value, format: Column["format"]) {
   if (value === null || value === "") return "—";
@@ -59,7 +58,7 @@ export default function ReportsPage() {
 }
 
 function ReportCard({ report }: { report: Report }) {
-  const wide = report.layout === "stats" || report.columns.length > 4;
+  const wide = report.layout === "stats";
   return (
     <section className={`report-card${wide ? " wide" : ""}`}>
       <header>
@@ -72,8 +71,8 @@ function ReportCard({ report }: { report: Report }) {
       {!report.rows.length ? <p className="site-meta">No data yet.</p>
         : report.layout === "stats" ? <Stats report={report} />
         : <>
-          {report.chart && <BarChart report={report} />}
-          <ReportTable report={report} />
+          {/* A chart already shows each row's label and value, so a table is only used when there's no chart. */}
+          {report.chart ? <BarChart report={report} /> : <ReportTable report={report} />}
         </>}
     </section>
   );
@@ -94,18 +93,22 @@ function BarChart({ report }: { report: Report }) {
   const { label, value } = report.chart!;
   const labelColumn = report.columns.find((c) => c.key === label);
   const valueColumn = report.columns.find((c) => c.key === value);
-  const rows = report.rows.slice(0, CHART_LIMIT);
+  const rows = report.rows;
+  // The chart draws one column; the other columns (e.g. COUNT and AVG results) are listed under each label.
+  const extras = report.columns.filter((c) => c.key !== label && c.key !== value);
   const max = Math.max(1, ...rows.map((row) => Number(row[value]) || 0));
   return (
     <div className="bar-chart" role="img" aria-label={`${valueColumn?.label} by ${labelColumn?.label}`}>
-      <small>{valueColumn?.label} by {labelColumn?.label?.toLowerCase()}{report.rows.length > CHART_LIMIT && ` (top ${CHART_LIMIT})`}</small>
-      {rows.map((row, i) => (
+      <small>{valueColumn?.label} by {labelColumn?.label?.toLowerCase()}{rows.length > 8 && ` · ${rows.length} rows, scroll for more`}</small>
+      <div className="bar-rows">{rows.map((row, i) => (
         <div key={i} className="bar-row">
-          <span title={String(row[label])}>{show(row[label], labelColumn?.format)}</span>
+          <span title={String(row[label])}>{show(row[label], labelColumn?.format)}
+            {extras.length > 0 && <small>{extras.map((c) => `${c.label}: ${show(row[c.key], c.format)}`).join(" · ")}</small>}
+          </span>
           <div className="bar-track"><i style={{ width: `${((Number(row[value]) || 0) / max) * 100}%` }} /></div>
           <strong>{show(row[value], valueColumn?.format)}</strong>
         </div>
-      ))}
+      ))}</div>
     </div>
   );
 }

@@ -139,19 +139,17 @@ const REPORTS: Report[] = [
     id: "org-overview", audience: "organizer", layout: "table",
     title: "Organization overview",
     description: "Events, active sign-ups, and hours for each organization you schedule for.",
-    aggregates: ["COUNT", "SUM", "AVG"],
+    aggregates: ["COUNT", "SUM"],
     columns: [
       { key: "Organization", label: "Organization" },
       { key: "Events", label: "Events", format: "number" },
       { key: "SignUps", label: "Sign-ups", format: "number" },
       { key: "Hours", label: "Total hours", format: "hours" },
-      { key: "AvgHours", label: "Avg hours per volunteer", format: "hours" },
     ],
     chart: { label: "Organization", value: "Hours" },
     sql: `SELECT o.Name AS Organization, COUNT(DISTINCT v.OpportunityID) AS Events,
             COUNT(CASE WHEN ${ACTIVE} THEN 1 END) AS SignUps,
-            COALESCE(SUM(r.HoursLogged), 0) AS Hours,
-            ROUND(AVG(CASE WHEN r.Status = 'Completed' THEN r.HoursLogged END), 1) AS AvgHours
+            COALESCE(SUM(r.HoursLogged), 0) AS Hours
           FROM Organization o
           LEFT JOIN VolunteerOpportunity v ON v.OrgID = o.OrgID
           LEFT JOIN Registration r ON r.OpportunityID = v.OpportunityID
