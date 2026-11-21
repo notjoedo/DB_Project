@@ -13,7 +13,7 @@
     "db:start": "docker compose up -d --wait",
     "db:stop": "docker compose down",
     "db:reset": "docker compose down -v && docker compose up -d --wait",
-    "role": "bash scripts/role.sh"
+    "admin:init": "node scripts/create-admin.mjs"
   },
   "dependencies": {
     "jose": "^6.1.0",

@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     await connection.beginTransaction();
     const [result] = await connection.execute<ResultSetHeader>(
       "INSERT INTO Users (FName, LName, Email, PasswordHash) VALUES (?, ?, ?, ?)", [first, last, email, await hashPassword(password)]);
-    // Every account starts with only the base 'User' role; others are granted with `npm run role`.
+    // Every account starts with only the base 'User' role; admins grant others on Users and Roles.
     await connection.execute("INSERT INTO UserRole (UserID, RoleID) SELECT ?, RoleID FROM Role WHERE RoleName='User'", [result.insertId]);
     await connection.commit();
     const user = await loadUser(result.insertId);

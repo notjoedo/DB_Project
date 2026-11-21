@@ -1,10 +1,11 @@
 import { crc32, deflateSync, inflateSync } from "node:zlib";
-import { canopyColor } from "./canopy";
+import { LAND_COVER, isDeveloped, needColor, needScore } from "./canopy";
 
 // MRLC hosts the National Land Cover Database (NLCD) for the lower 48 states.
 const WMS = "https://www.mrlc.gov/geoserver/mrlc_display/wms";
 export const CANOPY_LAYER = "nlcd_tcc_conus_2021_v2021-4";
 export const LAND_COVER_LAYER = "NLCD_2021_Land_Cover_L48";
+export const IMPERVIOUS_LAYER = "NLCD_2021_Impervious_L48";
 const EDGE = 20037508.342789244;
 const TILE = 256;
 const NO_DATA = 101;
@@ -50,19 +51,41 @@ export async function pointValue(layer: string, lat: number, lng: number) {
   return typeof value === "number" ? value : null;
 }
 
+/** Canopy %, impervious %, land cover, and planting need at one point (nulls outside the lower 48). */
+export async function readPoint(lat: number, lng: number) {
+  const [canopyRaw, landCover, imperviousRaw] = await Promise.all([
+    pointValue(CANOPY_LAYER, lat, lng), pointValue(LAND_COVER_LAYER, lat, lng), pointValue(IMPERVIOUS_LAYER, lat, lng),
+  ]);
+  const covered = landCover !== null && landCover in LAND_COVER;
+  const canopy = covered && canopyRaw !== null && canopyRaw <= 100 ? canopyRaw : null;
+  const impervious = covered && imperviousRaw !== null && imperviousRaw <= 100 ? imperviousRaw : null;
+  return {
+    canopy,
+    impervious,
+    need: canopy !== null && impervious !== null ? needScore(canopy, impervious) : null,
+    landCover: covered ? LAND_COVER[landCover] : null,
+    developed: isDeveloped(landCover),
+  };
+}
+
 /**
- * Canopy tile recolored as "where trees are needed": developed land is colored by its
- * canopy %, everything else (forest, farmland, water, outside the US) is transparent.
+ * "Where trees are needed" tile: each developed pixel gets a planting-need score from its
+ * canopy % and impervious (paved/roofed) %; everything else (forest, farmland, water,
+ * outside the US) is transparent.
  */
 export async function plantingNeedTile(z: number, x: number, y: number) {
   const bbox = tileBounds(z, x, y);
-  const [canopy, landCover] = await Promise.all([fetchTile(CANOPY_LAYER, bbox), fetchTile(LAND_COVER_LAYER, bbox)]);
+  const [canopy, landCover, impervious] = await Promise.all([
+    fetchTile(CANOPY_LAYER, bbox), fetchTile(LAND_COVER_LAYER, bbox), fetchTile(IMPERVIOUS_LAYER, bbox),
+  ]);
   const developed = new Set<number>();
   landCover.palette.forEach((rgb, index) => { if (DEVELOPED_RGB.has(rgb.join(","))) developed.add(index); });
   const pixels = Buffer.alloc(TILE * TILE, NO_DATA);
   for (let i = 0; i < pixels.length; i++) {
-    // In the canopy tiles, palette index N is N% canopy (0–100).
-    if (developed.has(landCover.pixels[i]) && canopy.pixels[i] <= 100) pixels[i] = canopy.pixels[i];
+    // In the canopy and impervious tiles, palette index N means N% (0–100); above 100 is no data.
+    if (developed.has(landCover.pixels[i]) && canopy.pixels[i] <= 100 && impervious.pixels[i] <= 100) {
+      pixels[i] = needScore(canopy.pixels[i], impervious.pixels[i]);
+    }
   }
   return encodeIndexedPng(pixels);
 }
@@ -120,7 +143,7 @@ const HEADER = (() => {
   ihdr.writeUInt32BE(TILE, 0); ihdr.writeUInt32BE(TILE, 4);
   ihdr[8] = 8; ihdr[9] = 3;
   const palette = Buffer.alloc((NO_DATA + 1) * 3), alpha = Buffer.alloc(NO_DATA + 1, 255);
-  for (let p = 0; p <= 100; p++) palette.set(canopyColor(p), p * 3);
+  for (let need = 0; need <= 100; need++) palette.set(needColor(need), need * 3);
   alpha[NO_DATA] = 0;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("PLTE", palette), chunk("tRNS", alpha)]);
 })();

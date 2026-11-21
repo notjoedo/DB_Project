@@ -180,11 +180,12 @@ INSERT INTO Role (RoleID, RoleName) VALUES
 -- UserRole: every user holds the base 'User' role ...
 INSERT INTO UserRole (UserID, RoleID)
 SELECT UserID, 1 FROM Users;
--- ... and some hold additional roles (43 rows total)
+-- ... and some hold additional roles (42 rows total).
+-- No Admin here: the first admin is created once with `npm run admin:init`,
+-- and that admin creates any others from the Users and Roles page.
 INSERT INTO UserRole (UserID, RoleID) VALUES
 (1,2),(4,2),(7,2),(10,2),(13,2),(16,2),(19,2),(22,2),   -- Organizers
-(3,3),(8,3),(15,3),(24,3),                              -- Arborists
-(1,4);                                                  -- Admin
+(3,3),(8,3),(15,3),(24,3);                              -- Arborists
 
 -- VolunteerOpportunity (25) — 1-15 already happened, 16-25 upcoming
 INSERT INTO VolunteerOpportunity (OrgID, Title, EventDate, Location) VALUES
@@ -374,13 +375,19 @@ ALTER TABLE VolunteerOpportunity
     ADD CONSTRAINT CK_Opportunity_Longitude CHECK (Longitude BETWEEN -180 AND 180),
     ADD CONSTRAINT CK_Opportunity_Coords CHECK ((Latitude IS NULL) = (Longitude IS NULL));
 
--- NeedScore (0-100) is derived, so it lives in a view instead of a column:
--- 50% missing canopy, 30% paved surface, 20% summer surface heat above 85F.
+-- Derived values live in a view instead of columns:
+--  NeedScore (0-100): 80% the same canopy/paved score the map colors use
+--    (60% missing canopy + 40% paved surface), plus 20% summer surface heat
+--    above 85F (each degree adds 4 points, capped at 110F). Because it builds on
+--    the map's formula, a site's score agrees with the map color under it.
+--  UpcomingEvents: plantings already scheduled at the site, so sites nobody is
+--    working on yet can be listed first.
 CREATE VIEW SitePriority AS
 SELECT s.*,
-       ROUND(0.5 * (100 - s.CanopyCoverPct)
-           + 0.3 * s.ImperviousPct
-           + 0.2 * LEAST(100, GREATEST(0, (s.SurfaceTempF - 85) * 4))) AS NeedScore
+       ROUND(0.8 * (0.6 * (100 - s.CanopyCoverPct) + 0.4 * s.ImperviousPct)
+           + 0.2 * LEAST(100, GREATEST(0, (s.SurfaceTempF - 85) * 4))) AS NeedScore,
+       (SELECT COUNT(*) FROM VolunteerOpportunity v
+         WHERE v.SiteID = s.SiteID AND v.EventDate >= CURDATE()) AS UpcomingEvents
 FROM PlantingSite s;
 
 -- TreeSpecies (12) — native to southwest Virginia
@@ -458,7 +465,7 @@ SET v.Latitude  = p.Latitude,
 -- =====================================================================
 --  AUTHENTICATION
 --  Passwords are stored only as scrypt hashes. Sample users have no
---  password until one is set with: npm run user:password -- <email>
+--  password; an admin can create accounts with a temporary password.
 -- =====================================================================
 
 ALTER TABLE Users

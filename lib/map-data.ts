@@ -1,29 +1,29 @@
 import type { RowDataPacket } from "mysql2";
 import { database } from "./server";
 
-export const SCHEDULER_ROLES = ["Coordinator", "Officer", "Director"];
-
 interface OrgRow extends RowDataPacket { OrgID: number; Organization: string; Reason: string }
 
 /**
  * Organizations a user may schedule events for:
- *   Admin role      → every organization
- *   Organizer role  → any organization they belong to
- *   otherwise       → organizations where they are a Coordinator, Officer, or Director
+ *   Admin role     → every organization
+ *   Organizer role → organizations they belong to (schema rule: only an organization's
+ *                    Organizers may create its opportunities)
+ *   anyone else    → none. Roles inside an organization (Coordinator, Officer, Director)
+ *                    are titles; they don't grant management on their own.
  */
 export async function schedulableOrgs(user: { UserID: number; roles: string[] }) {
   const admin = user.roles.includes("Admin"), organizer = user.roles.includes("Organizer");
   const [rows] = await database().query<OrgRow[]>(`SELECT o.OrgID, o.Name AS Organization,
       COALESCE(m.OrgRole, 'Admin') AS Reason
     FROM Organization o LEFT JOIN OrganizationMember m ON m.OrgID=o.OrgID AND m.UserID=?
-    WHERE ? OR m.OrgRole IN (?) OR (? AND m.UserID IS NOT NULL)
-    ORDER BY o.Name`, [user.UserID, admin, SCHEDULER_ROLES, organizer]);
+    WHERE ? OR (? AND m.UserID IS NOT NULL)
+    ORDER BY o.Name`, [user.UserID, admin, organizer]);
   return rows.map(({ OrgID, Organization, Reason }) => ({ OrgID, Organization, Reason }));
 }
 
 interface SiteRow extends RowDataPacket {
   SiteID: number; Name: string; Latitude: number; Longitude: number; CanopyCoverPct: number; ImperviousPct: number;
-  SurfaceTempF: number; TreesNeeded: number; Status: string; SubmittedDate: string; SubmittedBy: string | null; NeedScore: number;
+  SurfaceTempF: number; TreesNeeded: number; Status: string; SubmittedDate: string; SubmittedBy: string | null; NeedScore: number; UpcomingEvents: number;
 }
 interface RecommendationRow extends RowDataPacket { SiteID: number; SpeciesID: number; CommonName: string; Quantity: number }
 interface EventRow extends RowDataPacket {
@@ -39,9 +39,10 @@ export async function mapSnapshot() {
   const [[sites], [recommendations], [events], [volunteers]] = await Promise.all([
     db.query<SiteRow[]>(`SELECT p.SiteID, p.Name, p.Latitude, p.Longitude, p.CanopyCoverPct, p.ImperviousPct,
       p.SurfaceTempF, p.TreesNeeded, p.Status, DATE_FORMAT(p.SubmittedDate, '%Y-%m-%d') AS SubmittedDate,
-      CONCAT(u.FName, ' ', u.LName) AS SubmittedBy, p.NeedScore
+      CONCAT(u.FName, ' ', u.LName) AS SubmittedBy, p.NeedScore, p.UpcomingEvents
       FROM SitePriority p LEFT JOIN Users u ON u.UserID=p.SubmittedBy
-      ORDER BY p.NeedScore DESC, p.SiteID`),
+      -- Unplanted sites with nothing scheduled first, then by need.
+      ORDER BY p.Status = 'Planted', p.UpcomingEvents > 0, p.NeedScore DESC, p.SiteID`),
     db.query<RecommendationRow[]>(`SELECT sr.SiteID, sr.SpeciesID, t.CommonName, sr.Quantity
       FROM SiteRecommendation sr JOIN TreeSpecies t ON t.SpeciesID=sr.SpeciesID
       ORDER BY sr.SiteID, sr.Quantity DESC`),
@@ -66,6 +67,7 @@ export async function mapSnapshot() {
     sites: sites.map((site) => ({
       ...site,
       NeedScore: Number(site.NeedScore),
+      UpcomingEvents: Number(site.UpcomingEvents),
       recommendations: recommendations.filter((rec) => rec.SiteID === site.SiteID).map(({ SpeciesID, CommonName, Quantity }) => ({ SpeciesID, CommonName, Quantity })),
     })),
     events: events.map((event) => ({

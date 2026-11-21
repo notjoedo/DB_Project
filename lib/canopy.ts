@@ -26,6 +26,28 @@ export function canopyColor(percent: number): [number, number, number] {
 export const canopyGradient = `linear-gradient(to right, ${CANOPY_STOPS.filter(([p]) => p <= 60)
   .map(([p, [r, g, b]]) => `rgb(${r} ${g} ${b}) ${(p / 60) * 100}%`).join(", ")})`;
 
+/**
+ * Planting need (0–100) for one map pixel: missing canopy weighted 60%, paved/roofed
+ * surface 40%. A parking lot (10% canopy, 90% paved) scores 90; a lawn with the same
+ * canopy but 5% paved scores 56 — canopy alone can't tell them apart.
+ */
+export const NEED_WEIGHTS = { canopyGap: 0.6, impervious: 0.4 };
+export function needScore(canopy: number, impervious: number) {
+  return Math.round(NEED_WEIGHTS.canopyGap * (100 - canopy) + NEED_WEIGHTS.impervious * impervious);
+}
+
+/** A planting area's score: 80% the map's need + 20% heat above 85°F. Mirrors the SitePriority view in SQL. */
+export function siteNeedScore(canopy: number, impervious: number, surfaceTempF: number) {
+  const heat = Math.min(100, Math.max(0, (surfaceTempF - 85) * 4));
+  return Math.round(0.8 * (NEED_WEIGHTS.canopyGap * (100 - canopy) + NEED_WEIGHTS.impervious * impervious) + 0.2 * heat);
+}
+
+/** Need → color, reusing the canopy scale flipped: high need is red, low need is green. */
+export const needColor = (need: number) => canopyColor(100 - need);
+
+export const needGradient = `linear-gradient(to right, ${[20, 40, 55, 70, 85, 100]
+  .map((need, i, all) => { const [r, g, b] = needColor(need); return `rgb(${r} ${g} ${b}) ${(i / (all.length - 1)) * 100}%`; }).join(", ")})`;
+
 /** National Land Cover Database class codes. */
 export const LAND_COVER: Record<number, string> = {
   11: "Open water", 12: "Perennial ice/snow",

@@ -25,7 +25,7 @@ export async function POST(request: Request) {
 
   try {
     if (!(await schedulableOrgs(user)).some((org) => org.OrgID === orgId)) {
-      return Response.json({ error: "You can't schedule events for this organization. Admins, Organizer members, and an organization's Coordinators, Officers, and Directors can." }, { status: 403 });
+      return Response.json({ error: "You can't schedule events for this organization. Only Admins and Organizers who belong to it can." }, { status: 403 });
     }
     const db = database();
     const [[check]] = await db.query<CheckRow[]>(`SELECT

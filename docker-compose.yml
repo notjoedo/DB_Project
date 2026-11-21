@@ -10,7 +10,7 @@ services:
       - mysql_data:/var/lib/mysql
       - ./sqlproject/volunteer_db.sql:/docker-entrypoint-initdb.d/volunteer_db.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-ptreefinder"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-ptreefinder"]
       interval: 5s
       timeout: 5s
       retries: 20

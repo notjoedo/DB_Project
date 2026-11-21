@@ -1,64 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AuthProvider, apiFetch, useAuth } from "./auth-client";
-import Modal from "./modal";
 import PlantingMap from "./planting-map";
+import ManageEventsPage from "./manage-events";
+import ManageOrgsPage from "./manage-orgs";
+import PeoplePage from "./people";
 import ProfilePage from "./profile";
+import ReportsPage from "./reports";
 
-type TableName = "Organization" | "Users" | "VolunteerOpportunity" | "OrganizationMember" | "Registration" | "PlantingSite";
-type Row = Record<string, string | number | null>;
-type Snapshot = {
-  counts: { TableName: string; RowCount: number }[];
-  tables: Record<TableName, Row[]>;
-  lookups: {
-    organizations: { id: number; label: string }[];
-    users: { id: number; label: string }[];
-    opportunities: { id: number; label: string }[];
-  };
-};
-
-const tables: Record<TableName, { label: string; singular: string; id: string; columns: { key: string; label: string }[] }> = {
-  Organization: {
-    label: "Organizations", singular: "organization", id: "OrgID",
-    columns: [{ key: "OrgID", label: "ID" }, { key: "Name", label: "Name" }, { key: "Type", label: "Type" }, { key: "ContactEmail", label: "Contact email" }],
-  },
-  Users: {
-    label: "Users", singular: "user", id: "UserID",
-    columns: [{ key: "UserID", label: "ID" }, { key: "FName", label: "First name" }, { key: "LName", label: "Last name" }, { key: "Email", label: "Email" }, { key: "Roles", label: "Roles" }],
-  },
-  VolunteerOpportunity: {
-    label: "Opportunities", singular: "opportunity", id: "OpportunityID",
-    columns: [{ key: "OpportunityID", label: "ID" }, { key: "Organization", label: "Organization" }, { key: "Title", label: "Title" }, { key: "EventDate", label: "Event date" }, { key: "Location", label: "Location" }, { key: "SignUps", label: "Sign-ups" }],
-  },
-  OrganizationMember: {
-    label: "Members", singular: "member", id: "MembershipID",
-    columns: [{ key: "MembershipID", label: "ID" }, { key: "Organization", label: "Organization" }, { key: "Member", label: "Member" }, { key: "JoinDate", label: "Join date" }, { key: "OrgRole", label: "Role" }],
-  },
-  Registration: {
-    label: "Registrations", singular: "registration", id: "RegistrationID",
-    columns: [{ key: "RegistrationID", label: "ID" }, { key: "Volunteer", label: "Volunteer" }, { key: "Opportunity", label: "Opportunity" }, { key: "RegistrationDate", label: "Registered" }, { key: "Status", label: "Status" }, { key: "HoursLogged", label: "Hours" }],
-  },
-  PlantingSite: {
-    label: "Planting Sites", singular: "site", id: "SiteID",
-    columns: [{ key: "SiteID", label: "ID" }, { key: "Name", label: "Name" }, { key: "Latitude", label: "Lat" }, { key: "Longitude", label: "Lng" }, { key: "CanopyCoverPct", label: "Canopy %" }, { key: "NeedScore", label: "Need" }, { key: "Status", label: "Status" }, { key: "SubmittedBy", label: "Submitted by" }],
-  },
-};
-
-const emptySnapshot: Snapshot = {
-  counts: [],
-  tables: { Organization: [], Users: [], VolunteerOpportunity: [], OrganizationMember: [], Registration: [], PlantingSite: [] },
-  lookups: { organizations: [], users: [], opportunities: [] },
-};
-const ROW_HEIGHT = 41;
-const HEADER_HEIGHT = 41;
-function pageNumbers(current: number, count: number): (number | null)[] {
-  if (count <= 7) return Array.from({ length: count }, (_, i) => i);
-  const pages = new Set([0, count - 1, current - 1, current, current + 1]);
-  const sorted = [...pages].filter((n) => n >= 0 && n < count).sort((x, y) => x - y);
-  return sorted.flatMap((n, i) => (i && n - sorted[i - 1] > 1 ? [null, n] : [n]));
-}
-const today = () => new Date().toISOString().slice(0, 10);
+// The interface is organized by task, not by table: each page below does one job
+// (and may touch several tables behind the scenes).
+type View = "map" | "profile" | "reports" | "people" | "events" | "orgs";
 
 export default function Treefinder() {
   return <AuthProvider><App /></AuthProvider>;
@@ -67,113 +20,41 @@ export default function Treefinder() {
 function App() {
   const { user, ready, hasRole, promptLogin, logout } = useAuth();
   const isAdmin = hasRole("Admin");
-  const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
-  const [view, setView] = useState<"map" | "database" | "profile">("map");
-  // Fall back to the map when the database or profile isn't available to this visitor.
-  const shown = (view === "database" && !isAdmin) || (view === "profile" && !user) ? "map" : view;
-  const [table, setTable] = useState<TableName>("Organization");
-  const [query, setQuery] = useState("");
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(8);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: number; name: string } | null>(null);
+  const [view, setView] = useState<View>("map");
+  // Whether this user runs at least one organization (Admin, an Organizer member, or an org's Coordinator/Officer/Director).
+  const [canManage, setCanManage] = useState(false);
+  // Fall back to the map when a page isn't available to this visitor.
+  const shown: View = (view === "people" && !isAdmin) || ((view === "profile" || view === "reports") && !user)
+    || ((view === "events" || view === "orgs") && !(user && canManage)) ? "map" : view;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const response = await apiFetch("/api/admin-data");
-      const result = (await response.json()) as Snapshot & { error?: string };
-      if (!response.ok) throw new Error(result.error);
-      setSnapshot(result);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Database unavailable.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Only administrators can read the Database Manager tables.
+  // Show the Manage tabs only to people who run at least one organization.
   useEffect(() => {
-    if (!isAdmin) return;
-    const timer = window.setTimeout(load, 0);
-    return () => window.clearTimeout(timer);
-  }, [load, isAdmin]);
+    if (!user) return;
+    let current = true;
+    apiFetch("/api/manage/events")
+      .then(async (response) => {
+        const result = (await response.json()) as { orgs?: unknown[] };
+        if (current) setCanManage(response.ok && Boolean(result.orgs?.length));
+      })
+      .catch(() => { if (current) setCanManage(false); });
+    return () => { current = false; };
+  }, [user]);
 
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-    const fit = () => setPageSize(Math.max(3, Math.floor((el.clientHeight - HEADER_HEIGHT) / ROW_HEIGHT)));
-    fit();
-    const observer = new ResizeObserver(fit);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [loading, shown]);
-
-  const rows = snapshot.tables[table];
-  const filteredRows = useMemo(() => {
-    const search = query.trim().toLowerCase();
-    return search ? rows.filter((row) => Object.values(row).join(" ").toLowerCase().includes(search)) : rows;
-  }, [query, rows]);
-  const pageCount = Math.max(1, Math.ceil(filteredRows.length / pageSize));
-  const currentPage = Math.min(page, pageCount - 1);
-  const pageRows = filteredRows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
-
-  async function insert(data: Record<string, string | number>) {
-    setSaving(true);
-    setMessage("");
-    try {
-      const response = await apiFetch("/api/admin-data", { method: "POST", body: JSON.stringify({ table, data }) });
-      const result = (await response.json()) as { error?: string; snapshot: Snapshot };
-      if (!response.ok) throw new Error(result.error);
-      setSnapshot(result.snapshot);
-      setAdding(false);
-      setMessage("Record inserted successfully.");
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "Insert failed.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function remove() {
-    if (!deleteTarget) return;
-    setSaving(true);
-    setMessage("");
-    try {
-      const response = await apiFetch("/api/admin-data", { method: "DELETE", body: JSON.stringify({ table, id: deleteTarget.id }) });
-      const result = (await response.json()) as { error?: string; snapshot: Snapshot };
-      if (!response.ok) throw new Error(result.error);
-      setSnapshot(result.snapshot);
-      setDeleteTarget(null);
-      setMessage("Record permanently deleted.");
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : "Delete failed.");
-    } finally {
-      setSaving(false);
-    }
-  }
+  const tab = (name: View, label: string) => <button className={shown === name ? "active" : ""} onClick={() => setView(name)}>{label}</button>;
 
   return (
     <main className="page">
       <header className="topbar">
         <div><img className="brand-logo" src="/logo.png" alt="Three Trees Tree Conservation" /></div>
         <nav className="nav-tabs" aria-label="Views">
-          <button className={shown === "map" ? "active" : ""} onClick={() => setView("map")}>Planting Map</button>
-          {isAdmin && <>
-            <span className="nav-divider" aria-hidden="true" />
-            {(Object.keys(tables) as TableName[]).map((name) => (
-              <button key={name} className={shown === "database" && table === name ? "active" : ""} onClick={() => { setView("database"); setTable(name); setQuery(""); setPage(0); setMessage(""); }}>
-                {tables[name].label}<strong>{snapshot.tables[name].length}</strong>
-              </button>
-            ))}
-          </>}
+          {tab("map", "Planting Map")}
+          {user && tab("reports", "Reports")}
         </nav>
+        {user && (canManage || isAdmin) && <nav className="nav-tabs manage-tabs" aria-label="Manage">
+          {canManage && <>{tab("events", "Manage Events")}{tab("orgs", "Manage Organizations")}</>}
+          {isAdmin && tab("people", "Users and Roles")}
+          <span className="nav-divider" aria-hidden="true" />
+        </nav>}
         <div className="account">
           {!ready ? null : user ? <>
             <button className={`account-button${shown === "profile" ? " active" : ""}`} onClick={() => setView("profile")}>
@@ -188,148 +69,51 @@ function App() {
       </header>
 
       {shown === "profile" ? (
-      <section className="content">
+      <section className="content narrow">
         <div className="title-row"><h1>My Profile</h1></div>
         <ProfilePage />
       </section>
-      ) : shown === "map" ? (
+      ) : shown === "reports" ? (
+      <section className="content">
+        <div className="title-row">
+          <h1>Reports</h1>
+          <span className="subtitle">Statistics for your roles · each report lists the SQL aggregates it uses</span>
+        </div>
+        <ReportsPage />
+      </section>
+      ) : shown === "events" ? (
+      <section className="content">
+        <div className="title-row">
+          <h1>Manage Events</h1>
+          <span className="subtitle">Edit or delete your organizations&apos; events, take attendance, and log volunteer hours</span>
+        </div>
+        <ManageEventsPage onSchedule={() => setView("map")} />
+      </section>
+      ) : shown === "orgs" ? (
+      <section className="content">
+        <div className="title-row">
+          <h1>Manage Organizations</h1>
+          <span className="subtitle">Add people to organizations, set their role in each, and keep contact details current</span>
+        </div>
+        <ManageOrgsPage />
+      </section>
+      ) : shown === "people" ? (
+      <section className="content">
+        <div className="title-row">
+          <h1>Users and Roles</h1>
+          <span className="subtitle">Create accounts and grant or remove Organizer, Arborist, and Admin roles</span>
+        </div>
+        <PeoplePage />
+      </section>
+      ) : (
       <section className="content">
         <div className="title-row">
           <h1>Planting Map</h1>
           <span className="subtitle">Blacksburg, VA · sites ranked by canopy gap, paved surface, and heat</span>
         </div>
-        <PlantingMap onChange={isAdmin ? load : undefined} />
+        <PlantingMap canSchedule={Boolean(user) && canManage} />
       </section>
-      ) : (
-      <section className="content">
-        <div className="title-row">
-          <h1>Database Manager</h1>
-          <button className="primary-button" onClick={() => table === "PlantingSite" ? setView("map") : setAdding(true)}>+ Add {tables[table].singular}</button>
-        </div>
-
-        {message && <p className="notice">{message}</p>}
-        {error && <div className="error"><span>{error}</span><button onClick={load}>Try again</button></div>}
-
-        <section className="database-card">
-          <div className="table-toolbar">
-            <div><h2>{tables[table].label}</h2><span>{rows.length} rows</span></div>
-            <input aria-label={`Search ${tables[table].label}`} placeholder="Search records..." value={query} onChange={(event) => { setQuery(event.target.value); setPage(0); }} />
-          </div>
-
-          {loading ? <p className="state">Loading database...</p> : (
-            <div className="table-wrap" ref={wrapRef}>
-              <table>
-                <thead><tr>{tables[table].columns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Action</th></tr></thead>
-                <tbody>
-                  {pageRows.map((row) => {
-                    const id = Number(row[tables[table].id]);
-                    return <tr key={id}>
-                      {tables[table].columns.map((column) => <td key={column.key}>{String(row[column.key] ?? "—")}</td>)}
-                      <td><button className="delete-button" onClick={() => setDeleteTarget({
-                        id,
-                        name: String(row.Name ?? row.Title ?? row.Member ?? row.Volunteer ?? `record ${id}`),
-                      })}>Delete</button></td>
-                    </tr>;
-                  })}
-                  {!filteredRows.length && <tr><td colSpan={tables[table].columns.length + 1} className="state">No matching records.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {!loading && (
-            <div className="pagination">
-              <span>{currentPage * pageSize + 1}–{Math.min((currentPage + 1) * pageSize, filteredRows.length)} of {filteredRows.length}</span>
-              <div className="pager" role="navigation" aria-label="Pagination">
-                <button aria-label="Previous page" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 0}>‹</button>
-                {pageNumbers(currentPage, pageCount).map((n, i) => n === null
-                  ? <span key={`gap${i}`} className="gap">…</span>
-                  : <button key={n} className={n === currentPage ? "current" : ""} aria-current={n === currentPage ? "page" : undefined} onClick={() => setPage(n)}>{n + 1}</button>)}
-                <button aria-label="Next page" onClick={() => setPage(currentPage + 1)} disabled={currentPage >= pageCount - 1}>›</button>
-              </div>
-            </div>
-          )}
-        </section>
-      </section>
-      )}
-
-      {adding && <RecordForm table={table} snapshot={snapshot} saving={saving} onClose={() => setAdding(false)} onSave={insert} />}
-      {deleteTarget && (
-        <Modal title="Permanently delete this record?" onClose={() => setDeleteTarget(null)}>
-          <p><strong>{deleteTarget.name}</strong> will be deleted. Related rows may also be removed by the database rules. This cannot be undone.</p>
-          <div className="modal-actions">
-            <button onClick={() => setDeleteTarget(null)} disabled={saving}>Cancel</button>
-            <button className="danger-button" onClick={remove} disabled={saving}>{saving ? "Deleting..." : "Delete permanently"}</button>
-          </div>
-        </Modal>
       )}
     </main>
   );
-}
-
-function RecordForm({ table, snapshot, saving, onClose, onSave }: {
-  table: TableName; snapshot: Snapshot; saving: boolean; onClose: () => void; onSave: (data: Record<string, string | number>) => void;
-}) {
-  const defaults: Record<string, string | number> = table === "OrganizationMember"
-    ? { JoinDate: today(), OrgRole: "Member" }
-    : table === "Registration" ? { RegistrationDate: today(), Status: "Pending", HoursLogged: 0 } : {};
-  const [form, setForm] = useState<Record<string, string | number>>(defaults);
-  const set = (name: string, value: string | number) => setForm((current) => ({ ...current, [name]: value }));
-
-  return (
-    <Modal title={`Add ${tables[table].singular}`} onClose={onClose}>
-      <form className="record-form" onSubmit={(event) => { event.preventDefault(); onSave(form); }}>
-        {table === "Organization" && <>
-          <Field label="Organization name" name="Name" form={form} set={set} maxLength={100} />
-          <SelectField label="Type" name="Type" form={form} set={set} options={["Nonprofit", "Government", "School", "Community Group", "Business"]} />
-          <Field label="Contact email" name="ContactEmail" type="email" form={form} set={set} maxLength={100} />
-        </>}
-        {table === "Users" && <>
-          <Field label="First name" name="FName" form={form} set={set} maxLength={50} />
-          <Field label="Last name" name="LName" form={form} set={set} maxLength={50} />
-          <Field label="Email" name="Email" type="email" form={form} set={set} maxLength={100} />
-        </>}
-        {table === "VolunteerOpportunity" && <>
-          <LookupField label="Organization" name="OrgID" options={snapshot.lookups.organizations} form={form} set={set} />
-          <Field label="Title" name="Title" form={form} set={set} maxLength={150} />
-          <Field label="Event date" name="EventDate" type="date" form={form} set={set} />
-          <Field label="Location" name="Location" form={form} set={set} maxLength={150} />
-        </>}
-        {table === "OrganizationMember" && <>
-          <LookupField label="Organization" name="OrgID" options={snapshot.lookups.organizations} form={form} set={set} />
-          <LookupField label="User" name="UserID" options={snapshot.lookups.users} form={form} set={set} />
-          <Field label="Join date" name="JoinDate" type="date" form={form} set={set} />
-          <SelectField label="Role" name="OrgRole" form={form} set={set} options={["Member", "Coordinator", "Officer", "Director"]} />
-        </>}
-        {table === "Registration" && <>
-          <LookupField label="User" name="UserID" options={snapshot.lookups.users} form={form} set={set} />
-          <LookupField label="Opportunity" name="OpportunityID" options={snapshot.lookups.opportunities} form={form} set={set} />
-          <Field label="Registration date" name="RegistrationDate" type="date" form={form} set={set} />
-          <SelectField label="Status" name="Status" form={form} set={set} options={["Pending", "Confirmed", "Cancelled", "Completed"]} />
-          <Field label="Hours logged" name="HoursLogged" type="number" form={form} set={set} min={0} max={24} step={0.25} />
-        </>}
-        <div className="modal-actions">
-          <button type="button" onClick={onClose} disabled={saving}>Cancel</button>
-          <button className="primary-button" disabled={saving}>{saving ? "Saving..." : "Insert record"}</button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-type FieldProps = { label: string; name: string; form: Record<string, string | number>; set: (name: string, value: string | number) => void };
-
-function Field({ label, name, form, set, ...inputProps }: FieldProps & Omit<React.InputHTMLAttributes<HTMLInputElement>, "form" | "name" | "value" | "onChange">) {
-  return <label><span>{label}</span><input required name={name} value={form[name] ?? ""} onChange={(event) => set(name, event.target.value)} {...inputProps} /></label>;
-}
-
-function SelectField({ label, name, form, set, options }: FieldProps & { options: string[] }) {
-  return <label><span>{label}</span><select required value={form[name] ?? ""} onChange={(event) => set(name, event.target.value)}>
-    <option value="">Choose one</option>{options.map((option) => <option key={option}>{option}</option>)}
-  </select></label>;
-}
-
-function LookupField({ label, name, form, set, options }: FieldProps & { options: { id: number; label: string }[] }) {
-  return <label><span>{label}</span><select required value={form[name] ?? ""} onChange={(event) => set(name, Number(event.target.value))}>
-    <option value="">Choose one</option>{options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-  </select></label>;
 }

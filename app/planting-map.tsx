@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LayerGroup, LeafletMouseEvent, Map as LeafletMap, TileLayer } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { canopyColor, canopyGradient } from "@/lib/canopy";
+import { NEED_WEIGHTS, needColor, needGradient, siteNeedScore } from "@/lib/canopy";
 import { apiFetch, useAuth } from "./auth-client";
 
 type Status = "Proposed" | "Approved" | "Planted";
 type Site = {
   SiteID: number; Name: string; Latitude: number; Longitude: number; CanopyCoverPct: number; ImperviousPct: number;
   SurfaceTempF: number; TreesNeeded: number; Status: Status; SubmittedDate: string; SubmittedBy: string | null; NeedScore: number;
+  UpcomingEvents: number;
   recommendations: { SpeciesID: number; CommonName: string; Quantity: number }[];
 };
 type Volunteer = { RegistrationID: number; UserID: number; Name: string; Status: string };
@@ -24,8 +25,9 @@ type SchedulableOrg = { OrgID: number; Organization: string; Reason: string };
 type Match = { Kind: "event" | "site"; ID: number; Field: string; Value: string };
 type Selection = { kind: "event" | "site"; id: number } | null;
 type Point = { lat: number; lng: number };
-type CanopyReading = { canopy: number | null; landCover: string | null; developed: boolean; error?: string };
+type CanopyReading = { canopy: number | null; impervious: number | null; need: number | null; landCover: string | null; developed: boolean; error?: string };
 type Draft = { OrgID: string; Title: string; EventDate: string; Location: string; Notes: string };
+type SiteDraft = { Name: string; TreesNeeded: string; SurfaceTempF: string };
 
 const CENTER: [number, number] = [37.2296, -80.4139];
 const STATUSES: Status[] = ["Proposed", "Approved", "Planted"];
@@ -34,6 +36,7 @@ const SITE_RADIUS_METERS = 300;
 const NEED_COLORS = { high: "#b8432f", medium: "#d98a2b", low: "#9a9440", planted: "#2f6b3d" };
 const emptyData: MapData = { sites: [], events: [] };
 const emptyDraft: Draft = { OrgID: "", Title: "Tree planting", EventDate: "", Location: "", Notes: "" };
+const emptySiteDraft: SiteDraft = { Name: "", TreesNeeded: "", SurfaceTempF: "" };
 
 function needLevel(site: Pick<Site, "Status" | "NeedScore">) {
   if (site.Status === "Planted") return "planted";
@@ -50,7 +53,8 @@ function metersBetween(a: Point, b: Point) {
   return 2 * 6371000 * Math.asin(Math.sqrt(h));
 }
 
-export default function PlantingMap({ onChange }: { onChange?: () => void }) {
+/** canSchedule: whether this user may schedule events (Admin, Organizer member, or an org leader). Hides the schedule buttons otherwise. */
+export default function PlantingMap({ onChange, canSchedule = false }: { onChange?: () => void; canSchedule?: boolean }) {
   const { user, hasRole, promptLogin } = useAuth();
   const [myOrgs, setMyOrgs] = useState<SchedulableOrg[] | null>(null);
   const [addresses, setAddresses] = useState<Record<string, string | null>>({});
@@ -64,9 +68,12 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
   const [eventFilter, setEventFilter] = useState<(typeof EVENT_FILTERS)[number]>("Upcoming");
   const [siteFilter, setSiteFilter] = useState<Status | "All">("All");
   const [selection, setSelection] = useState<Selection>(null);
-  const [scheduling, setScheduling] = useState(false);
+  // Placing a new event or a new planting area on the map; `scheduling` is true for either.
+  const [mode, setMode] = useState<"event" | "site" | null>(null);
+  const scheduling = mode !== null;
   const [point, setPoint] = useState<Point | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [siteDraft, setSiteDraft] = useState<SiteDraft>(emptySiteDraft);
   const [readings, setReadings] = useState<Record<string, CanopyReading>>({});
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<Map<string, Match[]> | null>(null);
@@ -116,7 +123,7 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
       }).addTo(map.current);
       canopyLayer.current = L.tileLayer("/api/canopy/tiles/{z}/{x}/{y}", {
         maxZoom: 19, maxNativeZoom: 15, opacity: 0.6,
-        attribution: 'Tree canopy &amp; land cover: <a href="https://www.mrlc.gov/">NLCD 2021</a>',
+        attribution: 'Tree canopy, impervious surface &amp; land cover: <a href="https://www.mrlc.gov/">NLCD 2021</a>',
       }).addTo(map.current);
       siteLayer.current = L.layerGroup().addTo(map.current);
       eventLayer.current = L.layerGroup().addTo(map.current);
@@ -187,10 +194,10 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
     fetch(`/api/canopy?lat=${lat}&lng=${lng}`, { signal: controller.signal })
       .then(async (response) => {
         const result = (await response.json()) as CanopyReading & { error?: string };
-        setReadings((current) => ({ ...current, [readingKey]: response.ok ? result : { canopy: null, landCover: null, developed: false, error: result.error } }));
+        setReadings((current) => ({ ...current, [readingKey]: response.ok ? result : { canopy: null, impervious: null, need: null, landCover: null, developed: false, error: result.error } }));
       })
       .catch(() => {
-        if (!controller.signal.aborted) setReadings((current) => ({ ...current, [readingKey]: { canopy: null, landCover: null, developed: false, error: "Tree canopy data is unavailable right now." } }));
+        if (!controller.signal.aborted) setReadings((current) => ({ ...current, [readingKey]: { canopy: null, impervious: null, need: null, landCover: null, developed: false, error: "Tree canopy data is unavailable right now." } }));
       });
     return () => controller.abort();
   }, [readingKey, readings]);
@@ -203,6 +210,15 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
     if (addressKey in addresses) {
       const address = addresses[addressKey];
       if (!address) return;
+      if (mode === "site") {
+        const name = address.slice(0, 100);
+        setSiteDraft((current) => {
+          if (current.Name && current.Name !== autoLocation.current) return current;
+          autoLocation.current = name;
+          return { ...current, Name: name };
+        });
+        return;
+      }
       setDraft((current) => {
         if (current.Location && current.Location !== autoLocation.current) return current;
         autoLocation.current = address;
@@ -221,7 +237,7 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
         if (!controller.signal.aborted) setAddresses((current) => ({ ...current, [addressKey]: null }));
       });
     return () => controller.abort();
-  }, [addressKey, addresses]);
+  }, [addressKey, addresses, mode]);
   const lookingUpAddress = Boolean(addressKey && !(addressKey in addresses));
 
   const matchesFor = (kind: "event" | "site", id: number) => matches?.get(`${kind}:${id}`);
@@ -276,9 +292,9 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
     if (activePoint) {
       L.marker([activePoint.lat, activePoint.lng], {
         icon: L.divIcon({ className: "", html: '<span class="event-pin draft"></span>', iconSize: [26, 26], iconAnchor: [13, 26] }),
-      }).bindTooltip("New event", { permanent: true, direction: "top", offset: [0, -24] }).addTo(draftLayer.current);
+      }).bindTooltip(mode === "site" ? "New planting area" : "New event", { permanent: true, direction: "top", offset: [0, -24] }).addTo(draftLayer.current);
     }
-  }, [mapReady, activePoint]);
+  }, [mapReady, activePoint, mode]);
 
   useEffect(() => {
     const L = leaflet.current;
@@ -328,7 +344,7 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
         if (orgs.length === 1) setDraft((current) => ({ ...current, OrgID: String(orgs[0].OrgID) }));
       })
       .catch(() => setMyOrgs([]));
-    setScheduling(true);
+    setMode("event");
     setSelection(null);
     setMessage("");
     setPoint(at ? { lat: at.Latitude, lng: at.Longitude } : null);
@@ -338,14 +354,43 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
 
   // Leave scheduling mode if the user logs out mid-way.
   if (scheduling && !user) {
-    setScheduling(false);
+    setMode(null);
     setPoint(null);
   }
 
   function stopScheduling() {
-    setScheduling(false);
+    setMode(null);
     setPoint(null);
     setDraft(emptyDraft);
+    setSiteDraft(emptySiteDraft);
+  }
+
+  // Any logged-in user can propose a planting area; arborists approve it later.
+  function startProposing() {
+    if (!user) { promptLogin(); return; }
+    setMode("site");
+    setSelection(null);
+    setMessage("");
+    setPoint(null);
+    autoLocation.current = "";
+    setSiteDraft(emptySiteDraft);
+  }
+
+  async function saveSite(event: React.FormEvent) {
+    event.preventDefault();
+    if (!point) return;
+    const name = siteDraft.Name.trim();
+    const result = await send("/api/sites", "POST", {
+      Name: name, Latitude: point.lat, Longitude: point.lng,
+      TreesNeeded: Number(siteDraft.TreesNeeded), SurfaceTempF: Number(siteDraft.SurfaceTempF),
+    }, `"${name}" proposed. An arborist will review it.`);
+    if (result?.id) {
+      stopScheduling();
+      setTab("sites");
+      setSiteFilter("All");
+      setQuery("");
+      setSelection({ kind: "site", id: result.id });
+    }
   }
 
   async function saveEvent(event: React.FormEvent) {
@@ -368,14 +413,15 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
     <div className="map-layout">
       <div className="map-stage">
         <div className="map-canvas" ref={host} />
-        {scheduling && !point && <p className="map-hint">Click the map where the event will happen</p>}
+        {scheduling && !point && <p className="map-hint">{mode === "site" ? "Click the street, park, or lot that needs trees" : "Click the map where the event will happen"}</p>}
         <div className="map-legend" aria-label="Legend">
           <strong>Where trees are needed</strong>
-          <div className="canopy-scale" style={{ background: canopyGradient }} />
-          <div className="canopy-labels"><span>0% canopy</span><span>30%</span><span>60%+</span></div>
+          <div className="canopy-scale" style={{ background: needGradient }} />
+          <div className="canopy-labels"><span>Low need</span><span>High need</span></div>
+          <p className="legend-scope">Need = {NEED_WEIGHTS.canopyGap * 100}% missing tree canopy + {NEED_WEIGHTS.impervious * 100}% paved or roofed surface.</p>
           <p className="legend-scope"><strong>Developed land only</strong> (cities, towns, neighborhoods). Forests, farmland, deserts, and water aren&apos;t shaded.</p>
-          <small>Tree canopy data: NLCD 2021</small>
-          <label><input type="checkbox" checked={layers.canopy} onChange={(e) => setLayers({ ...layers, canopy: e.target.checked })} />Canopy color scale</label>
+          <small>Tree canopy &amp; impervious surface data: NLCD 2021</small>
+          <label><input type="checkbox" checked={layers.canopy} onChange={(e) => setLayers({ ...layers, canopy: e.target.checked })} />Planting need colors</label>
           <label><input type="checkbox" checked={layers.sites} onChange={(e) => setLayers({ ...layers, sites: e.target.checked })} /><i className="legend-ring" />Planting areas</label>
           <label><input type="checkbox" checked={layers.events} onChange={(e) => setLayers({ ...layers, events: e.target.checked })} /><i className="legend-pin" />Volunteer events</label>
         </div>
@@ -385,7 +431,10 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
         {message && <p className="notice">{message}</p>}
         {error && <div className="error"><span>{error}</span><button onClick={load}>Try again</button></div>}
 
-        {scheduling ? (
+        {mode === "site" ? (
+          <SiteForm draft={siteDraft} setDraft={setSiteDraft} point={point} reading={reading} nearestSite={nearestSite} lookingUpAddress={lookingUpAddress}
+            saving={saving} onCancel={stopScheduling} onSubmit={saveSite} />
+        ) : scheduling ? (
           <ScheduleForm orgs={myOrgs} draft={draft} setDraft={setDraft} point={point} reading={reading} nearestSite={nearestSite} lookingUpAddress={lookingUpAddress}
             saving={saving} onCancel={stopScheduling} onSubmit={saveEvent} />
         ) : selectedEvent ? (
@@ -400,8 +449,9 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
             canReview={hasRole("Admin", "Arborist")}
             onBack={() => setSelection(null)}
             onEvent={(id) => { setSelection({ kind: "event", id }); setTab("events"); }}
-            onSchedule={() => startScheduling(selectedSite)}
-            onStatus={(status) => send("/api/sites", "PATCH", { id: selectedSite.SiteID, Status: status }, `${selectedSite.Name} marked ${status}.`)} />
+            onSchedule={canSchedule ? () => startScheduling(selectedSite) : undefined}
+            onStatus={(status) => send("/api/sites", "PATCH", { id: selectedSite.SiteID, Status: status }, `${selectedSite.Name} marked ${status}.`)}
+            onReview={(trees, heat) => send("/api/sites", "PATCH", { id: selectedSite.SiteID, TreesNeeded: trees, SurfaceTempF: heat }, `${selectedSite.Name} updated: ${trees} trees, ${heat}°F.`)} />
         ) : (
           <>
             <div className="panel-tabs" role="tablist">
@@ -424,7 +474,7 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
                   <div className="status-filter" role="group" aria-label="Filter events">
                     {EVENT_FILTERS.map((filter) => <button key={filter} className={eventFilter === filter ? "active" : ""} onClick={() => setEventFilter(filter)}>{filter}</button>)}
                   </div>
-                  <button className="primary-button" onClick={() => startScheduling()}>+ Schedule event</button>
+                  {canSchedule && <button className="primary-button" onClick={() => startScheduling()}>+ Schedule event</button>}
                 </div>
                 {loading ? <p className="state">Loading events...</p> : (
                   <ol className="site-list">
@@ -450,6 +500,7 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
                   <div className="status-filter" role="group" aria-label="Filter planting areas">
                     {(["All", ...STATUSES] as const).map((status) => <button key={status} className={siteFilter === status ? "active" : ""} onClick={() => setSiteFilter(status)}>{status}</button>)}
                   </div>
+                  <button className="primary-button" onClick={startProposing}>+ Propose area</button>
                 </div>
                 {loading ? <p className="state">Loading planting areas...</p> : (
                   <ol className="site-list">
@@ -457,7 +508,7 @@ export default function PlantingMap({ onChange }: { onChange?: () => void }) {
                       <li key={site.SiteID}>
                         <button onClick={() => setSelection({ kind: "site", id: site.SiteID })}>
                           <span className="site-score" style={{ background: NEED_COLORS[needLevel(site)] }}>{site.NeedScore}</span>
-                          <span className="site-name"><strong>{site.Name}</strong><small>{site.TreesNeeded} trees · {site.CanopyCoverPct}% canopy</small>
+                          <span className="site-name"><strong>{site.Name}</strong><small>{site.TreesNeeded} trees · {site.CanopyCoverPct}% canopy{site.UpcomingEvents > 0 && site.Status !== "Planted" && ` · ${site.UpcomingEvents} planting${site.UpcomingEvents > 1 ? "s" : ""} scheduled`}</small>
                             <MatchReason matches={matchesFor("site", site.SiteID)} /></span>
                           <span className={`status-tag ${site.Status.toLowerCase()}`}>{site.Status}</span>
                         </button>
@@ -483,11 +534,14 @@ function CanopyNote({ reading }: { reading: CanopyReading | null }) {
   if (!reading) return <p className="canopy-note">Checking tree canopy here...</p>;
   if (reading.error) return <p className="canopy-note">{reading.error}</p>;
   if (reading.canopy === null) return <p className="canopy-note">No tree canopy data here (outside the lower 48 states).</p>;
-  const [r, g, b] = canopyColor(reading.canopy);
+  const [r, g, b] = needColor(reading.need ?? 100 - reading.canopy);
   return (
     <p className="canopy-note">
       <i style={{ background: `rgb(${r} ${g} ${b})` }} />
-      <span><strong>{reading.canopy}% tree canopy</strong> · {reading.landCover}
+      <span>
+        {reading.need !== null && <><strong>Planting need {reading.need}/100</strong> · </>}
+        <strong>{reading.canopy}% tree canopy</strong>
+        {reading.impervious !== null && <> · {reading.impervious}% paved</>} · {reading.landCover}
         {!reading.developed && <small>Not developed land, so it isn&apos;t shaded on the map. Most community planting happens along streets, in neighborhoods, and in parks.</small>}
       </span>
     </p>
@@ -509,11 +563,11 @@ function ScheduleForm({ orgs, draft, setDraft, point, reading, nearestSite, look
       {point && <CanopyNote reading={reading} />}
       {point && nearestSite && <p className="site-meta">Inside planting area <strong>{nearestSite.Name}</strong> (need {nearestSite.NeedScore}). The event will be linked to it.</p>}
       {orgs === null ? <p className="state">Checking your organizations...</p> : !orgs.length ? (
-        <p className="error">You can&apos;t schedule events for any organization yet. You need the Admin role, the Organizer role plus membership in an organization, or to be an organization&apos;s Coordinator, Officer, or Director.</p>
+        <p className="error">You can&apos;t schedule events for any organization yet. You need the Admin role, or the Organizer role plus membership in an organization.</p>
       ) : (
         <label><span>Organization</span><select required value={draft.OrgID} onChange={(e) => set("OrgID", e.target.value)}>
           <option value="">Choose an organization</option>
-          {orgs.map((org) => <option key={org.OrgID} value={org.OrgID}>{org.Organization} ({org.Reason})</option>)}
+          {orgs.map((org) => <option key={org.OrgID} value={org.OrgID}>{org.Organization}</option>)}
         </select></label>
       )}
       <div className="field-pair">
@@ -530,6 +584,65 @@ function ScheduleForm({ orgs, draft, setDraft, point, reading, nearestSite, look
       <div className="modal-actions">
         <button type="button" onClick={onCancel} disabled={saving}>Cancel</button>
         <button className="primary-button" disabled={saving || !point || !orgs?.length}>{saving ? "Saving..." : "Schedule event"}</button>
+      </div>
+    </form>
+  );
+}
+
+function SiteForm({ draft, setDraft, point, reading, nearestSite, lookingUpAddress, saving, onCancel, onSubmit }: {
+  draft: SiteDraft; setDraft: React.Dispatch<React.SetStateAction<SiteDraft>>; point: Point | null; reading: CanopyReading | null;
+  nearestSite: Site | null; lookingUpAddress: boolean; saving: boolean; onCancel: () => void; onSubmit: (event: React.FormEvent) => void;
+}) {
+  const set = (name: keyof SiteDraft, value: string) => setDraft((current) => ({ ...current, [name]: value }));
+  // OpenStreetMap check: is the point on a roof, sports field, or water?
+  const [obstructions, setObstructions] = useState<Record<string, string | null>>({});
+  const key = point ? pointKey(point) : null;
+  useEffect(() => {
+    if (!key || key in obstructions) return;
+    const [lat, lng] = key.split(",");
+    const controller = new AbortController();
+    fetch(`/api/sites/check?lat=${lat}&lng=${lng}`, { signal: controller.signal })
+      .then(async (response) => {
+        const result = (await response.json()) as { obstruction?: string | null };
+        // A failed lookup counts as clear; the server checks again and an arborist reviews.
+        setObstructions((current) => ({ ...current, [key]: response.ok ? result.obstruction ?? null : null }));
+      })
+      .catch(() => { if (!controller.signal.aborted) setObstructions((current) => ({ ...current, [key]: null })); });
+    return () => controller.abort();
+  }, [key, obstructions]);
+  const checking = Boolean(key && !(key in obstructions));
+  const obstruction = key ? obstructions[key] ?? null : null;
+  const scorable = Boolean(reading && reading.developed && reading.canopy !== null && reading.impervious !== null);
+  const heat = Number(draft.SurfaceTempF);
+  const preview = scorable && draft.SurfaceTempF && Number.isFinite(heat) ? siteNeedScore(reading!.canopy!, reading!.impervious!, heat) : null;
+
+  return (
+    <form className="record-form site-form" onSubmit={onSubmit}>
+      <div className="panel-head">
+        <h2>Propose a planting area</h2>
+        <span>{point ? `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)} · click the map to move it` : "Click the street, park, or lot that needs trees"}</span>
+      </div>
+      {point && <CanopyNote reading={reading} />}
+      {point && reading && !reading.error && reading.canopy !== null && !reading.developed && (
+        <p className="error">Planting areas must be on developed land. Try a nearby street, school, or park.</p>
+      )}
+      {point && checking && <p className="site-meta">Checking for buildings and sports fields...</p>}
+      {point && obstruction && <p className="error">This spot is on <strong>{obstruction}</strong>, where trees can&apos;t be planted. Try a lawn, a street strip, or the edge of a parking lot.</p>}
+      {point && nearestSite && <p className="error">This spot is already inside <strong>{nearestSite.Name}</strong>. Pick a spot farther away, or schedule an event there instead.</p>}
+      <p className="site-meta">Tree canopy and paved surface are filled in automatically from NLCD 2021 satellite data. New areas start as <strong>Proposed</strong> until an arborist approves them.</p>
+      <label><span>Area name</span><input required maxLength={100} value={draft.Name} onChange={(e) => set("Name", e.target.value)}
+        placeholder={lookingUpAddress ? "Looking up the address..." : point ? "e.g. Elm Street sidewalk strip" : "Click the map to fill this in"} /></label>
+      <div className="field-pair">
+        <label><span>Trees needed</span><input required type="number" min={1} max={1000} step={1} value={draft.TreesNeeded}
+          onChange={(e) => set("TreesNeeded", e.target.value)} placeholder="e.g. 20" /></label>
+        <label><span>Summer surface °F</span><input required type="number" min={50} max={140} step={0.1} value={draft.SurfaceTempF}
+          onChange={(e) => set("SurfaceTempF", e.target.value)} placeholder="e.g. 100" /></label>
+      </div>
+      <small className="site-meta">Surface temperature on a hot summer afternoon. Shaded grass is often near 90°F; parking lots, 105–110°F.</small>
+      {preview !== null && <p className="site-meta">Need score: <strong>{preview}/100</strong></p>}
+      <div className="modal-actions">
+        <button type="button" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button className="primary-button" disabled={saving || !point || !scorable || Boolean(nearestSite) || checking || Boolean(obstruction)}>{saving ? "Saving..." : "Propose area"}</button>
       </div>
     </form>
   );
@@ -577,9 +690,10 @@ function EventDetail({ event, userId, reading, saving, onBack, onSite, onLogin, 
   );
 }
 
-function SiteDetail({ site, events, saving, canReview, onBack, onEvent, onSchedule, onStatus }: {
+function SiteDetail({ site, events, saving, canReview, onBack, onEvent, onSchedule, onStatus, onReview }: {
   site: Site; events: VolunteerEvent[]; saving: boolean; canReview: boolean;
-  onBack: () => void; onEvent: (id: number) => void; onSchedule: () => void; onStatus: (status: Status) => void;
+  onBack: () => void; onEvent: (id: number) => void; onSchedule?: () => void; onStatus: (status: Status) => void;
+  onReview: (trees: number, heat: number) => void;
 }) {
   const next: Partial<Record<Status, { status: Status; label: string }>> = {
     Proposed: { status: "Approved", label: "Approve area" },
@@ -604,6 +718,7 @@ function SiteDetail({ site, events, saving, canReview, onBack, onEvent, onSchedu
         <div><dt>Trees needed</dt><dd>{site.TreesNeeded}</dd></div>
       </dl>
       <p className="site-meta">Submitted by {site.SubmittedBy ?? "a deleted user"} on {site.SubmittedDate}</p>
+      {canReview && <SiteReview key={site.SiteID} site={site} saving={saving} onSave={onReview} />}
 
       <h3>Recommended trees</h3>
       {site.recommendations.length ? (
@@ -620,13 +735,30 @@ function SiteDetail({ site, events, saving, canReview, onBack, onEvent, onSchedu
         ))}</ul>
       ) : <p className="site-meta">No events scheduled yet.</p>}
 
-      <div className="modal-actions">
+      {onSchedule && <div className="modal-actions">
         <button className="primary-button" onClick={onSchedule}>+ Schedule event here</button>
-      </div>
+      </div>}
       {canReview && <div className="modal-actions status-actions">
         {site.Status !== "Proposed" && <button disabled={saving} onClick={() => onStatus("Proposed")}>Reset to proposed</button>}
         {next[site.Status] && <button disabled={saving} onClick={() => onStatus(next[site.Status]!.status)}>{saving ? "Saving..." : next[site.Status]!.label}</button>}
       </div>}
     </div>
+  );
+}
+
+/** Arborists and admins can correct the trees needed and summer surface temperature a user proposed. */
+function SiteReview({ site, saving, onSave }: { site: Site; saving: boolean; onSave: (trees: number, heat: number) => void }) {
+  const [trees, setTrees] = useState(String(site.TreesNeeded));
+  const [heat, setHeat] = useState(String(site.SurfaceTempF));
+  const changed = Number(trees) !== Number(site.TreesNeeded) || Number(heat) !== Number(site.SurfaceTempF);
+  return (
+    <form className="record-form site-review" onSubmit={(e) => { e.preventDefault(); onSave(Number(trees), Number(heat)); }}>
+      <h3>Arborist review</h3>
+      <div className="field-pair">
+        <label><span>Trees needed</span><input required type="number" min={1} max={1000} step={1} value={trees} onChange={(e) => setTrees(e.target.value)} /></label>
+        <label><span>Summer surface (°F)</span><input required type="number" min={50} max={140} step={0.1} value={heat} onChange={(e) => setHeat(e.target.value)} /></label>
+      </div>
+      <div className="modal-actions"><button className="primary-button" disabled={saving || !changed}>{saving ? "Saving..." : "Save review"}</button></div>
+    </form>
   );
 }
