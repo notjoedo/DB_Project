@@ -21,6 +21,7 @@ const ORG_ROLES = ["Member", "Coordinator", "Officer", "Director"];
 interface OrgRow extends RowDataPacket { OrgID: number; Name: string; Type: string; ContactEmail: string; Events: number }
 interface MemberRow extends RowDataPacket { MembershipID: number; OrgID: number; UserID: number; Name: string; Email: string; OrgRole: string; JoinDate: string }
 interface PersonRow extends RowDataPacket { UserID: number; Name: string; Email: string }
+interface OrgEventRow extends RowDataPacket { OpportunityID: number; OrgID: number; Title: string; EventDate: string; Upcoming: number; SignUps: number }
 interface OrgOfRow extends RowDataPacket { OrgID: number }
 
 const str = (value: unknown, max: number) => typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -34,7 +35,7 @@ async function snapshot(user: SessionUser) {
   const ids = await managedIds(user);
   if (!ids.length) return { canCreate: isAdmin(user), organizations: [], people: [] };
   const db = database();
-  const [[orgs], [members], [people]] = await Promise.all([
+  const [[orgs], [members], [people], [events]] = await Promise.all([
     db.query<OrgRow[]>(`SELECT o.OrgID, o.Name, o.Type, o.ContactEmail,
         (SELECT COUNT(*) FROM VolunteerOpportunity v WHERE v.OrgID = o.OrgID) AS Events
       FROM Organization o WHERE o.OrgID IN (?) ORDER BY o.Name`, [ids]),
@@ -43,12 +44,18 @@ async function snapshot(user: SessionUser) {
       FROM OrganizationMember m JOIN Users u ON u.UserID = m.UserID WHERE m.OrgID IN (?)
       ORDER BY FIELD(m.OrgRole, 'Director', 'Officer', 'Coordinator', 'Member'), u.LName, u.FName`, [ids]),
     db.query<PersonRow[]>("SELECT UserID, CONCAT(FName, ' ', LName) AS Name, Email FROM Users ORDER BY LName, FName"),
+    db.query<OrgEventRow[]>(`SELECT v.OpportunityID, v.OrgID, v.Title, DATE_FORMAT(v.EventDate, '%Y-%m-%d') AS EventDate,
+        v.EventDate >= CURDATE() AS Upcoming, COUNT(CASE WHEN r.Status <> 'Cancelled' THEN 1 END) AS SignUps
+      FROM VolunteerOpportunity v LEFT JOIN Registration r ON r.OpportunityID = v.OpportunityID
+      WHERE v.OrgID IN (?) GROUP BY v.OpportunityID, v.OrgID, v.Title, v.EventDate ORDER BY v.EventDate DESC`, [ids]),
   ]);
   return {
     canCreate: isAdmin(user),
     organizations: orgs.map((org) => ({
       ...org,
       Events: Number(org.Events),
+      events: events.filter((e) => e.OrgID === org.OrgID).map(({ OpportunityID, Title, EventDate, Upcoming, SignUps }) =>
+        ({ OpportunityID, Title, EventDate, Upcoming: Boolean(Upcoming), SignUps: Number(SignUps) })),
       members: members.filter((m) => m.OrgID === org.OrgID).map(({ MembershipID, UserID, Name, Email, OrgRole, JoinDate }) => ({ MembershipID, UserID, Name, Email, OrgRole, JoinDate })),
     })),
     people: people.map(({ UserID, Name, Email }) => ({ UserID, Name, Email })),

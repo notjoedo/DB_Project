@@ -5,6 +5,7 @@ import type { LayerGroup, LeafletMouseEvent, Map as LeafletMap, TileLayer } from
 import "leaflet/dist/leaflet.css";
 import { NEED_WEIGHTS, needColor, needGradient, siteNeedScore } from "@/lib/canopy";
 import { apiFetch, useAuth } from "./auth-client";
+import Modal from "./modal";
 
 type Status = "Proposed" | "Approved" | "Planted";
 type Site = {
@@ -451,7 +452,8 @@ export default function PlantingMap({ onChange, canSchedule = false }: { onChang
             onEvent={(id) => { setSelection({ kind: "event", id }); setTab("events"); }}
             onSchedule={canSchedule ? () => startScheduling(selectedSite) : undefined}
             onStatus={(status) => send("/api/sites", "PATCH", { id: selectedSite.SiteID, Status: status }, `${selectedSite.Name} marked ${status}.`)}
-            onReview={(trees, heat) => send("/api/sites", "PATCH", { id: selectedSite.SiteID, TreesNeeded: trees, SurfaceTempF: heat }, `${selectedSite.Name} updated: ${trees} trees, ${heat}°F.`)} />
+            onReview={(trees, heat) => send("/api/sites", "PATCH", { id: selectedSite.SiteID, TreesNeeded: trees, SurfaceTempF: heat }, `${selectedSite.Name} updated: ${trees} trees, ${heat}°F.`)}
+            onDelete={async () => { if (await send("/api/sites", "DELETE", { id: selectedSite.SiteID }, `${selectedSite.Name} was deleted.`)) setSelection(null); }} />
         ) : (
           <>
             <div className="panel-tabs" role="tablist">
@@ -690,11 +692,12 @@ function EventDetail({ event, userId, reading, saving, onBack, onSite, onLogin, 
   );
 }
 
-function SiteDetail({ site, events, saving, canReview, onBack, onEvent, onSchedule, onStatus, onReview }: {
+function SiteDetail({ site, events, saving, canReview, onBack, onEvent, onSchedule, onStatus, onReview, onDelete }: {
   site: Site; events: VolunteerEvent[]; saving: boolean; canReview: boolean;
   onBack: () => void; onEvent: (id: number) => void; onSchedule?: () => void; onStatus: (status: Status) => void;
-  onReview: (trees: number, heat: number) => void;
+  onReview: (trees: number, heat: number) => void; onDelete: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const next: Partial<Record<Status, { status: Status; label: string }>> = {
     Proposed: { status: "Approved", label: "Approve area" },
     Approved: { status: "Planted", label: "Mark as planted" },
@@ -742,6 +745,19 @@ function SiteDetail({ site, events, saving, canReview, onBack, onEvent, onSchedu
         {site.Status !== "Proposed" && <button disabled={saving} onClick={() => onStatus("Proposed")}>Reset to proposed</button>}
         {next[site.Status] && <button disabled={saving} onClick={() => onStatus(next[site.Status]!.status)}>{saving ? "Saving..." : next[site.Status]!.label}</button>}
       </div>}
+      {canReview && <div className="modal-actions spread">
+        <button className="text-danger" disabled={saving} onClick={() => setConfirmDelete(true)}>Delete area</button>
+      </div>}
+      {confirmDelete && (
+        <Modal title="Delete this planting area?" onClose={() => setConfirmDelete(false)}>
+          <p><strong>{site.Name}</strong> and its tree recommendations will be permanently deleted.
+            {events.length > 0 && ` Its ${events.length} event${events.length === 1 ? "" : "s"} will stay, but no longer be linked to an area.`}</p>
+          <div className="modal-actions">
+            <button onClick={() => setConfirmDelete(false)} disabled={saving}>Keep area</button>
+            <button className="danger-button" disabled={saving} onClick={() => { setConfirmDelete(false); onDelete(); }}>Delete area</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

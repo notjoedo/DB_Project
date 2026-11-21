@@ -5,7 +5,8 @@ import { apiFetch } from "./auth-client";
 import Modal from "./modal";
 
 type Member = { MembershipID: number; UserID: number; Name: string; Email: string; OrgRole: string; JoinDate: string };
-type Org = { OrgID: number; Name: string; Type: string; ContactEmail: string; Events: number; members: Member[] };
+type OrgEvent = { OpportunityID: number; Title: string; EventDate: string; Upcoming: boolean; SignUps: number };
+type Org = { OrgID: number; Name: string; Type: string; ContactEmail: string; Events: number; events: OrgEvent[]; members: Member[] };
 type Person = { UserID: number; Name: string; Email: string };
 type OrgData = { canCreate: boolean; organizations: Org[]; people: Person[] };
 type Details = { Name: string; Type: string; ContactEmail: string };
@@ -15,10 +16,11 @@ const ORG_ROLES = ["Member", "Coordinator", "Officer", "Director"];
 const joined = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const X = <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>;
 
-export default function ManageOrgsPage() {
+/** initialOrgId opens that organization (e.g. from an event's "Hosted by" link); onOpenEvent jumps to Manage Events. */
+export default function ManageOrgsPage({ onOpenEvent, initialOrgId = null }: { onOpenEvent: (eventId: number) => void; initialOrgId?: number | null }) {
   const [data, setData] = useState<OrgData | null>(null);
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(initialOrgId);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -87,7 +89,7 @@ export default function ManageOrgsPage() {
         {message && <p className="notice">{message}</p>}
         {error && <p className="error">{error}</p>}
         {!selected ? <p className="state">Choose an organization to manage its members and details.</p>
-          : <OrgDetail key={selected.OrgID} org={selected} people={data.people} canDelete={data.canCreate} busy={busy}
+          : <OrgDetail key={selected.OrgID} org={selected} people={data.people} canDelete={data.canCreate} busy={busy} onOpenEvent={onOpenEvent}
               onSaveDetails={(d) => send("PATCH", { OrgID: selected.OrgID, ...d }, "Organization details saved.")}
               onDelete={async () => { if (await send("DELETE", { OrgID: selected.OrgID }, `${selected.Name} was deleted.`)) setSelectedId(null); }}
               onAdd={(person, role) => send("POST", { OrgID: selected.OrgID, UserID: person.UserID, OrgRole: role }, `${person.Name} joined ${selected.Name} as ${role}.`)}
@@ -108,8 +110,8 @@ export default function ManageOrgsPage() {
   );
 }
 
-function OrgDetail({ org, people, canDelete, busy, onSaveDetails, onDelete, onAdd, onRole, onRemove }: {
-  org: Org; people: Person[]; canDelete: boolean; busy: boolean;
+function OrgDetail({ org, people, canDelete, busy, onOpenEvent, onSaveDetails, onDelete, onAdd, onRole, onRemove }: {
+  org: Org; people: Person[]; canDelete: boolean; busy: boolean; onOpenEvent: (eventId: number) => void;
   onSaveDetails: (d: Details) => void; onDelete: () => void;
   onAdd: (person: Person, role: string) => Promise<unknown>; onRole: (m: Member, role: string) => void; onRemove: (m: Member) => void;
 }) {
@@ -170,6 +172,18 @@ function OrgDetail({ org, people, canDelete, busy, onSaveDetails, onDelete, onAd
               <button className="primary-button" disabled={busy}>Save details</button>
             </div>
           </form>
+
+          <h3>Events hosted <small className="site-meta">{org.events.length} · edit them in Manage Events</small></h3>
+          {org.events.length ? (
+            <ul className="plain-list">
+              {org.events.map((e) => (
+                <li key={e.OpportunityID}>
+                  <button className="text-link" onClick={() => onOpenEvent(e.OpportunityID)}>{e.Title}<small>{joined(e.EventDate)}{e.Upcoming ? "" : " · past"}</small></button>
+                  <span>{e.SignUps} signed up</span>
+                </li>
+              ))}
+            </ul>
+          ) : <p className="site-meta">No events yet. Schedule one on the Planting Map.</p>}
         </section>
       </div>
 

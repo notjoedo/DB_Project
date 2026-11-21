@@ -24,6 +24,9 @@ function App() {
   const [view, setView] = useState<View>("map");
   // Whether this user runs at least one organization (Admin, an Organizer member, or an org's Coordinator/Officer/Director).
   const [canManage, setCanManage] = useState(false);
+  // Cross-links between Manage Events and Manage Organizations open the linked item.
+  const [openEventId, setOpenEventId] = useState<number | null>(null);
+  const [openOrgId, setOpenOrgId] = useState<number | null>(null);
   // Fall back to the map when a page isn't available to this visitor.
   const shown: View = (view === "people" && !isAdmin) || ((view === "profile" || view === "reports") && !user)
     || ((view === "events" || view === "orgs" || view === "requests") && !(user && canManage)) ? "map" : view;
@@ -59,7 +62,7 @@ function App() {
     return () => { current = false; };
   }, [user]);
 
-  const tab = (name: View, label: string) => <button className={shown === name ? "active" : ""} onClick={() => setView(name)}>{label}</button>;
+  const tab = (name: View, label: string) => <button className={shown === name ? "active" : ""} onClick={() => { setOpenEventId(null); setOpenOrgId(null); setView(name); }}>{label}</button>;
 
   return (
     <main className="page">
@@ -112,7 +115,8 @@ function App() {
           <h1>Manage Events</h1>
           <span className="subtitle">Edit or delete your organizations&apos; events, take attendance, and log volunteer hours</span>
         </div>
-        <ManageEventsPage onSchedule={() => setView("map")} />
+        <ManageEventsPage key={`events-${openEventId}`} initialEventId={openEventId} onSchedule={() => setView("map")}
+          onOpenOrg={(orgId) => { setOpenOrgId(orgId); setView("orgs"); }} />
       </section>
       ) : shown === "requests" ? (
       <section className="content">
@@ -128,7 +132,8 @@ function App() {
           <h1>Manage Organizations</h1>
           <span className="subtitle">Add people to organizations, set their role in each, and keep contact details current</span>
         </div>
-        <ManageOrgsPage />
+        <ManageOrgsPage key={`orgs-${openOrgId}`} initialOrgId={openOrgId}
+          onOpenEvent={(eventId) => { setOpenEventId(eventId); setView("events"); }} />
       </section>
       ) : shown === "people" ? (
       <section className="content">

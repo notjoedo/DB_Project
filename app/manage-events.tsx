@@ -20,11 +20,14 @@ function DateBadge({ date, past }: { date: string; past: boolean }) {
   return <span className={`date-badge${past ? " past" : ""}`}><small>{d.toLocaleDateString("en-US", { month: "short" })}</small>{d.getDate()}</span>;
 }
 
-export default function ManageEventsPage({ onSchedule }: { onSchedule: () => void }) {
+/** initialEventId opens that event (e.g. when coming from Manage Organizations); onOpenOrg shows the hosting organization. */
+export default function ManageEventsPage({ onSchedule, onOpenOrg, initialEventId = null }: {
+  onSchedule: () => void; onOpenOrg: (orgId: number) => void; initialEventId?: number | null;
+}) {
   const [data, setData] = useState<ManageData | null>(null);
-  const [filter, setFilter] = useState<Filter>("upcoming");
+  const [filter, setFilter] = useState<Filter>(initialEventId ? "all" : "upcoming");
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(initialEventId);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -105,7 +108,7 @@ export default function ManageEventsPage({ onSchedule }: { onSchedule: () => voi
         {message && <p className="notice">{message}</p>}
         {error && <p className="error">{error}</p>}
         {!selected ? <p className="state">{noEvents ? "You don't manage any events yet. Schedule one on the Planting Map and it will appear here." : "Choose an event to edit it or take attendance."}</p>
-          : <EventDetail key={selected.OpportunityID} event={selected} busy={busy}
+          : <EventDetail key={selected.OpportunityID} event={selected} busy={busy} onOpenOrg={() => onOpenOrg(selected.OrgID)}
               onSave={(form) => send("/api/manage/events", "PATCH", { OpportunityID: selected.OpportunityID, ...form }, "Event details saved.")}
               onDelete={async () => { if (await send("/api/manage/events", "DELETE", { OpportunityID: selected.OpportunityID }, `"${selected.Title}" was deleted.`)) setSelectedId(null); }}
               onAttendance={(v, Status, HoursLogged) => send("/api/manage/attendance", "PATCH", { RegistrationID: v.RegistrationID, Status, HoursLogged },
@@ -117,8 +120,8 @@ export default function ManageEventsPage({ onSchedule }: { onSchedule: () => voi
 
 type EventForm = { Title: string; EventDate: string; Location: string; Notes: string };
 
-function EventDetail({ event, busy, onSave, onDelete, onAttendance }: {
-  event: ManagedEvent; busy: boolean;
+function EventDetail({ event, busy, onOpenOrg, onSave, onDelete, onAttendance }: {
+  event: ManagedEvent; busy: boolean; onOpenOrg: () => void;
   onSave: (form: EventForm) => void; onDelete: () => void;
   onAttendance: (v: Volunteer, status: string, hours: number) => void;
 }) {
@@ -132,7 +135,8 @@ function EventDetail({ event, busy, onSave, onDelete, onAttendance }: {
     <>
       <div className="panel-head">
         <h2>{event.Title}</h2>
-        <span>{event.Organization} · {longDate(event.EventDate)}{event.SiteName && ` · ${event.SiteName}`}</span>
+        <span>Hosted by <button className="inline-link" onClick={onOpenOrg} title="Open this organization">{event.Organization}</button>
+          {" · "}{longDate(event.EventDate)}{event.SiteName && ` · ${event.SiteName}`}</span>
       </div>
 
       <div className="manage-columns">

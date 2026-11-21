@@ -118,3 +118,23 @@ export async function PATCH(request: Request) {
     return Response.json({ error: "The site could not be updated." }, { status: 503 });
   }
 }
+
+/**
+ * Delete a planting area (arborists and admins only). Its tree recommendations are removed
+ * with it (ON DELETE CASCADE); events held there stay but lose the link (ON DELETE SET NULL).
+ */
+export async function DELETE(request: Request) {
+  const { denied } = await requireUser(request, "Admin", "Arborist");
+  if (denied) return denied;
+  const body = (await request.json().catch(() => ({}))) as { id?: unknown };
+  const id = Number(body.id);
+  if (!Number.isInteger(id)) return Response.json({ error: "Choose a site." }, { status: 400 });
+  try {
+    const [result] = await database().execute<ResultSetHeader>("DELETE FROM PlantingSite WHERE SiteID=?", [id]);
+    if (!result.affectedRows) return Response.json({ error: "Site not found." }, { status: 404 });
+    return Response.json({ ok: true, snapshot: await mapSnapshot() });
+  } catch (error) {
+    console.error("MySQL delete:", error);
+    return Response.json({ error: "The site could not be deleted." }, { status: 503 });
+  }
+}
