@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AuthProvider, apiFetch, useAuth } from "./auth-client";
 import PlantingMap from "./planting-map";
 import ManageEventsPage from "./manage-events";
@@ -8,10 +8,11 @@ import ManageOrgsPage from "./manage-orgs";
 import PeoplePage from "./people";
 import ProfilePage from "./profile";
 import ReportsPage from "./reports";
+import RequestsPage, { type VolunteerRequest } from "./requests";
 
 // The interface is organized by task, not by table: each page below does one job
 // (and may touch several tables behind the scenes).
-type View = "map" | "profile" | "reports" | "people" | "events" | "orgs";
+type View = "map" | "profile" | "reports" | "people" | "events" | "orgs" | "requests";
 
 export default function Treefinder() {
   return <AuthProvider><App /></AuthProvider>;
@@ -25,7 +26,25 @@ function App() {
   const [canManage, setCanManage] = useState(false);
   // Fall back to the map when a page isn't available to this visitor.
   const shown: View = (view === "people" && !isAdmin) || ((view === "profile" || view === "reports") && !user)
-    || ((view === "events" || view === "orgs") && !(user && canManage)) ? "map" : view;
+    || ((view === "events" || view === "orgs" || view === "requests") && !(user && canManage)) ? "map" : view;
+  // Volunteer Requests: pending sign-ups for upcoming events of the organizations this user manages.
+  const [requests, setRequests] = useState<{ list: VolunteerRequest[]; error: string }>({ list: [], error: "" });
+  const loadRequests = useCallback(async () => {
+    try {
+      const response = await apiFetch("/api/requests");
+      const result = (await response.json()) as { requests?: VolunteerRequest[]; error?: string };
+      if (!response.ok) throw new Error(result.error);
+      setRequests({ list: result.requests ?? [], error: "" });
+    } catch (cause) {
+      setRequests((current) => ({ ...current, error: cause instanceof Error ? cause.message : "Could not load volunteer requests." }));
+    }
+  }, []);
+  useEffect(() => {
+    if (!user || !canManage) return;
+    const timer = window.setTimeout(loadRequests, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRequests, user, canManage]);
+  const pendingCount = requests.list.filter((r) => r.Status === "Pending").length;
 
   // Show the Manage tabs only to people who run at least one organization.
   useEffect(() => {
@@ -51,7 +70,13 @@ function App() {
           {user && tab("reports", "Reports")}
         </nav>
         {user && (canManage || isAdmin) && <nav className="nav-tabs manage-tabs" aria-label="Manage">
-          {canManage && <>{tab("events", "Manage Events")}{tab("orgs", "Manage Organizations")}</>}
+          {canManage && <>
+            {tab("events", "Manage Events")}
+            <button className={shown === "requests" ? "active" : ""} onClick={() => { setView("requests"); loadRequests(); }}>
+              Volunteer Requests{pendingCount > 0 && <strong>{pendingCount}</strong>}
+            </button>
+            {tab("orgs", "Manage Organizations")}
+          </>}
           {isAdmin && tab("people", "Users and Roles")}
           <span className="nav-divider" aria-hidden="true" />
         </nav>}
@@ -89,6 +114,14 @@ function App() {
         </div>
         <ManageEventsPage onSchedule={() => setView("map")} />
       </section>
+      ) : shown === "requests" ? (
+      <section className="content">
+        <div className="title-row">
+          <h1>Volunteer Requests</h1>
+          <span className="subtitle">Accept or decline sign-ups for your organizations&apos; upcoming events</span>
+        </div>
+        <RequestsPage requests={requests.list} error={requests.error} onChange={(list) => setRequests({ list, error: "" })} />
+      </section>
       ) : shown === "orgs" ? (
       <section className="content">
         <div className="title-row">
@@ -111,7 +144,7 @@ function App() {
           <h1>Planting Map</h1>
           <span className="subtitle">Blacksburg, VA · sites ranked by canopy gap, paved surface, and heat</span>
         </div>
-        <PlantingMap canSchedule={Boolean(user) && canManage} />
+        <PlantingMap canSchedule={Boolean(user) && canManage} onChange={canManage ? loadRequests : undefined} />
       </section>
       )}
     </main>

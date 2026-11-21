@@ -44,6 +44,8 @@ npm run admin:init           # once: create the first admin (prompts for name, e
 
 Roles are `User`, `Organizer`, `Arborist`, and `Admin` (the `Role`/`UserRole` tables). Admins can schedule and manage events for any organization, and Organizers for the organizations they belong to. Roles inside an organization (Member, Coordinator, Officer, Director) are titles only. Approving or planting an area needs `Arborist` or `Admin`.
 
+- **Volunteer Requests page:** new sign-ups start as `Pending`. Admins, and Organizers for the organizations they belong to, see a *Volunteer Requests* tab listing pending sign-ups for that organization's upcoming events, and can accept (→ `Confirmed`) or decline (→ `Cancelled`) them.
+
 How sessions work:
 - Logging in returns a **15-minute access token** (a signed JWT). The browser keeps it in localStorage and sends it as `Authorization: Bearer ...`.
 - A **7-day refresh token** is set as an httpOnly, SameSite=Strict cookie that page scripts can't read. The database stores only its SHA-256 hash (`RefreshToken` table).
